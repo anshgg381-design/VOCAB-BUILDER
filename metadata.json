@@ -1,0 +1,6 @@
+{
+  "name": "CUET UG 2027 Vocabulary Collector",
+  "description": "Complete Brave browser Manifest V3 extension for collecting English words, idioms, and phrasal verbs with simple Gemini-powered meanings, one example sentence, and local storage.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings — CUET Vocabulary Builder</title>
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <div class="page-wrap">
+    <header class="top-bar">
+      <div>
+        <h1 class="page-title">Settings</h1>
+        <p class="page-subtitle">Configure your personal Gemini API key and model for CUET Vocabulary Builder.</p>
+      </div>
+      <a href="dashboard.html" class="nav-link">Open My CUET Library</a>
+    </header>
+
+    <main class="content">
+      <section class="panel" aria-labelledby="gemini-heading">
+        <h2 id="gemini-heading" class="section-title">Gemini API Configuration</h2>
+
+        <form id="settings-form" class="settings-form" novalidate>
+          <div class="field">
+            <label for="api-key-input" class="field-label">Gemini API Key</label>
+            <div class="key-input-row">
+              <input
+                type="password"
+                id="api-key-input"
+                class="text-input"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="AIza..."
+              />
+              <button type="button" id="btn-toggle-key" class="secondary-btn">Show</button>
+            </div>
+            <p class="field-help">
+              Stored locally in Brave via <code>chrome.storage.local</code>. Requests are made only from the background service worker.
+            </p>
+          </div>
+
+          <div class="field">
+            <label for="model-select" class="field-label">Gemini Model</label>
+            <select id="model-select" class="select-input"></select>
+          </div>
+
+          <div class="field">
+            <label for="custom-model-input" class="field-label">
+              Custom Model ID <span class="optional-note">(optional — overrides dropdown if filled)</span>
+            </label>
+            <input
+              type="text"
+              id="custom-model-input"
+              class="text-input"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Leave blank to use selected model above"
+            />
+          </div>
+
+          <div class="field">
+            <label for="sheet-webhook-input" class="field-label">
+              Google Sheets Auto-Save URL <span class="optional-note">(optional — saves every fetched entry automatically)</span>
+            </label>
+            <input
+              type="url"
+              id="sheet-webhook-input"
+              class="text-input"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="https://script.google.com/macros/s/.../exec"
+            />
+            <p class="field-help">
+              Automatically creates and appends to three tabs: <code>Words</code>, <code>Idioms</code>, and <code>Phrasal Verbs</code> (Expression, Meaning, Example Sentence).
+            </p>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" id="btn-save-settings" class="primary-btn">Save Settings</button>
+            <button type="button" id="btn-test-connection" class="secondary-btn">Test Gemini Connection</button>
+            <button type="button" id="btn-test-sheet" class="secondary-btn">Test Google Sheet</button>
+          </div>
+
+          <div id="feedback-box" class="feedback-box" hidden aria-live="polite"></div>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="sheets-guide-heading">
+        <div class="section-head-row">
+          <h2 id="sheets-guide-heading" class="section-title">Auto-Save to Google Sheets (60-Second Setup)</h2>
+          <button type="button" id="btn-copy-script" class="secondary-btn btn-sm">Copy Apps Script</button>
+        </div>
+        <ol class="steps-list">
+          <li>Open a new Google Sheet at <strong>sheets.new</strong> (or open the CUET Google Sheet you created in the web app).</li>
+          <li>In the top menu, click <strong>Extensions &rarr; Apps Script</strong>.</li>
+          <li>Delete any starter text in the editor, paste the script below, and press <strong>Ctrl+S</strong> (or Cmd+S) to save.</li>
+          <li>Click <strong>Deploy &rarr; New deployment</strong>, choose <strong>Web app</strong>, set <strong>Who has access</strong> to <strong>Anyone</strong>, and click <strong>Deploy</strong>.</li>
+          <li>Copy the generated Web App URL (ends with <code>/exec</code>), paste it into <strong>Google Sheets Auto-Save URL</strong> above, click <strong>Save Settings</strong>, and click <strong>Test Google Sheet</strong>.</li>
+        </ol>
+        <pre id="apps-script-code" class="code-box"></pre>
+      </section>
+
+      <section class="panel" aria-labelledby="guide-heading">
+        <h2 id="guide-heading" class="section-title">How to Get a Gemini API Key</h2>
+        <ol class="steps-list">
+          <li>Visit Google AI Studio at <strong>aistudio.google.com</strong> and sign in with your Google account.</li>
+          <li>Click <strong>Get API key</strong> in the left sidebar.</li>
+          <li>Click <strong>Create API key</strong> and copy the generated key (it starts with <code>AIza</code>).</li>
+          <li>Paste the key into the field above, click <strong>Save Settings</strong>, and click <strong>Test Gemini Connection</strong>.</li>
+        </ol>
+      </section>
+
+      <section class="panel notice-panel" aria-labelledby="privacy-heading">
+        <h2 id="privacy-heading" class="section-title">Privacy &amp; Local Storage Notes</h2>
+        <ul class="notes-list">
+          <li>Your API key and Google Sheets URL are never hardcoded in source files, never exposed to website scripts, and never included in exported JSON or CSV backups.</li>
+          <li>Because this extension has no backend server and stores settings locally in your browser profile, a locally stored API key is not completely protected against someone who has direct access to your computer or extension files. Use this extension for your personal study only.</li>
+          <li>All vocabulary, idioms, and phrasal verbs are stored locally in Brave. Uninstalling the extension may remove your locally stored data, so export a JSON backup from your CUET Library periodically.</li>
+        </ul>
+      </section>
+    </main>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

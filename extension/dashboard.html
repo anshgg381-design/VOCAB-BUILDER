@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My CUET Library — CUET Vocabulary Builder</title>
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="site-header">
+      <div class="header-inner">
+        <div class="brand-group">
+          <h1 class="site-title">CUET Vocabulary Builder</h1>
+        </div>
+        <nav class="header-actions" aria-label="Library actions">
+          <button type="button" id="btn-toggle-add" class="secondary-btn">Add Entries</button>
+          <button type="button" id="btn-toggle-backup" class="secondary-btn">Backup &amp; Export</button>
+          <a href="settings.html" class="nav-link">Settings</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="main-container">
+      <div id="api-key-banner" class="banner-warn" hidden>
+        <span>Add your Gemini API key in Settings to analyse or reanalyse expressions.</span>
+        <a href="settings.html" class="banner-link">Open Settings</a>
+      </div>
+
+      <div id="toast-bar" class="toast-bar" hidden aria-live="polite"></div>
+
+      <!-- Collapsible Add / Bulk Entry Panel -->
+      <section id="add-panel" class="collapsible-panel" hidden aria-label="Add entries manually">
+        <div class="panel-header">
+          <h2 class="panel-title">Manual &amp; Bulk Entry</h2>
+          <button type="button" id="btn-close-add" class="text-btn">Close</button>
+        </div>
+        <form id="dashboard-add-form" class="add-form" novalidate>
+          <label for="dash-entry-input" class="field-label">
+            Enter one expression or multiple separated by commas or new lines
+          </label>
+          <textarea
+            id="dash-entry-input"
+            class="textarea-input"
+            rows="3"
+            placeholder="aberration, meticulous, pragmatic&#10;Break the ice&#10;Come across"
+          ></textarea>
+          <div class="add-form-row">
+            <div class="control-group">
+              <label for="dash-category-select" class="inline-label">Category</label>
+              <select id="dash-category-select" class="select-input">
+                <option value="auto">Auto-detect</option>
+                <option value="vocabulary">Vocabulary</option>
+                <option value="idioms">Idioms</option>
+                <option value="phrasalVerbs">Phrasal Verbs</option>
+              </select>
+            </div>
+            <button type="submit" id="btn-dash-save" class="primary-btn">Save and Analyse</button>
+          </div>
+          <div id="dash-add-status" class="inline-status" hidden aria-live="polite">
+            <p id="dash-add-summary" class="status-summary"></p>
+            <ul id="dash-add-details" class="status-list"></ul>
+          </div>
+        </form>
+      </section>
+
+      <!-- Collapsible Backup & Export Panel -->
+      <section id="backup-panel" class="collapsible-panel" hidden aria-label="Backup and export">
+        <div class="panel-header">
+          <h2 class="panel-title">Local Storage &amp; Backups</h2>
+          <button type="button" id="btn-close-backup" class="text-btn">Close</button>
+        </div>
+        <p class="backup-note">
+          All entries are stored locally in Brave. Uninstalling this extension may permanently remove your locally stored data, so export a JSON backup periodically. Exported files never include your Gemini API key.
+        </p>
+        <div class="backup-actions">
+          <button type="button" id="btn-export-json" class="secondary-btn">Export JSON Backup</button>
+          <button type="button" id="btn-import-json" class="secondary-btn">Import JSON Backup</button>
+          <input type="file" id="import-file-input" accept=".json,application/json" hidden />
+          <button type="button" id="btn-export-csv" class="secondary-btn">Export All as CSV</button>
+          <button type="button" id="btn-clear-library" class="danger-btn">Clear Library</button>
+        </div>
+      </section>
+
+      <!-- Three Collection Tabs -->
+      <div class="tabs-bar" role="tablist" aria-label="Vocabulary collections">
+        <button
+          type="button"
+          role="tab"
+          id="tab-vocabulary"
+          class="tab-btn"
+          aria-selected="true"
+          data-tab="vocabulary"
+        >
+          Vocabulary <span class="tab-count" id="tab-count-vocabulary">0</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="tab-idioms"
+          class="tab-btn"
+          aria-selected="false"
+          data-tab="idioms"
+        >
+          Idioms <span class="tab-count" id="tab-count-idioms">0</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="tab-phrasalVerbs"
+          class="tab-btn"
+          aria-selected="false"
+          data-tab="phrasalVerbs"
+        >
+          Phrasal Verbs <span class="tab-count" id="tab-count-phrasalVerbs">0</span>
+        </button>
+      </div>
+
+      <!-- Search, Sort & Filter Toolbar -->
+      <section class="toolbar" aria-label="Search and filter entries">
+        <div class="search-wrap">
+          <label for="search-input" class="sr-only">Search entries</label>
+          <input
+            type="search"
+            id="search-input"
+            class="search-input"
+            placeholder="Search expressions, meanings, or examples…"
+          />
+        </div>
+
+        <div class="toolbar-controls">
+          <div class="control-group">
+            <label for="filter-select" class="sr-only">Filter status</label>
+            <select id="filter-select" class="select-input">
+              <option value="all">All entries</option>
+              <option value="unlearned">Unlearned</option>
+              <option value="learned">Learned</option>
+              <option value="favourites">Favourites</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label for="sort-select" class="sr-only">Sort order</label>
+            <select id="sort-select" class="select-input">
+              <option value="recent">Recently added</option>
+              <option value="az">Alphabetical (A–Z)</option>
+              <option value="za">Alphabetical (Z–A)</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- Entries List -->
+      <section aria-live="polite" aria-label="Saved entries">
+        <div id="entries-list" class="entries-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Edit Entry Dialog -->
+  <dialog id="edit-dialog" class="modal-dialog" aria-labelledby="edit-dialog-title">
+    <form id="edit-form" class="modal-form" method="dialog">
+      <div class="modal-head">
+        <h2 id="edit-dialog-title" class="modal-title">Edit Entry</h2>
+        <button type="button" id="btn-edit-close" class="text-btn">Close</button>
+      </div>
+
+      <input type="hidden" id="edit-id" />
+
+      <div class="field">
+        <label for="edit-expression" class="field-label">Expression</label>
+        <input type="text" id="edit-expression" class="text-input" required />
+      </div>
+
+      <div class="field">
+        <label for="edit-category" class="field-label">Collection</label>
+        <select id="edit-category" class="select-input">
+          <option value="vocabulary">Vocabulary</option>
+          <option value="idioms">Idioms</option>
+          <option value="phrasalVerbs">Phrasal Verbs</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="edit-meaning" class="field-label">Meaning</label>
+        <textarea id="edit-meaning" class="textarea-input" rows="3" required></textarea>
+      </div>
+
+      <div class="field">
+        <label for="edit-example" class="field-label">Example Sentence</label>
+        <textarea id="edit-example" class="textarea-input" rows="2" required></textarea>
+      </div>
+
+      <p id="edit-error" class="modal-error" hidden></p>
+
+      <div class="modal-actions">
+        <button type="button" id="btn-edit-cancel" class="secondary-btn">Cancel</button>
+        <button type="submit" id="btn-edit-save" class="primary-btn">Save Changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Confirm Delete / Clear Dialog -->
+  <dialog id="confirm-dialog" class="modal-dialog modal-narrow" aria-labelledby="confirm-title">
+    <div class="modal-form">
+      <h2 id="confirm-title" class="modal-title">Confirm Action</h2>
+      <p id="confirm-message" class="confirm-text"></p>
+      <div class="modal-actions">
+        <button type="button" id="btn-confirm-cancel" class="secondary-btn">Cancel</button>
+        <button type="button" id="btn-confirm-proceed" class="danger-solid-btn">Delete</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="shared.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

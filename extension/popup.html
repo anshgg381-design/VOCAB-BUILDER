@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CUET Vocabulary Builder</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup-shell">
+    <header class="popup-header">
+      <h1 class="popup-title">CUET Vocabulary Builder</h1>
+      <button type="button" id="btn-settings" class="text-btn">Settings</button>
+    </header>
+
+    <div id="api-key-notice" class="notice-banner" hidden>
+      <span>Add your Gemini API key in Settings to analyse new entries.</span>
+      <button type="button" id="btn-notice-settings" class="notice-link">Open Settings</button>
+    </div>
+
+    <main class="popup-main">
+      <form id="manual-form" class="entry-form" novalidate>
+        <label for="entry-input" class="field-label">
+          Add word, idiom, or phrasal verb
+        </label>
+        <textarea
+          id="entry-input"
+          class="entry-textarea"
+          rows="3"
+          placeholder="Single entry or multiple separated by commas or new lines&#10;e.g. meticulous, break the ice, come across"
+        ></textarea>
+
+        <div class="form-controls">
+          <div class="select-wrap">
+            <label for="category-select" class="sr-only">Category</label>
+            <select id="category-select" class="category-select">
+              <option value="auto">Auto-detect</option>
+              <option value="vocabulary">Vocabulary</option>
+              <option value="idioms">Idioms</option>
+              <option value="phrasalVerbs">Phrasal Verbs</option>
+            </select>
+          </div>
+          <button type="submit" id="btn-save" class="primary-btn">
+            Save and Analyse
+          </button>
+        </div>
+      </form>
+
+      <div id="status-box" class="status-box" hidden aria-live="polite">
+        <p id="status-summary" class="status-summary"></p>
+        <ul id="status-details" class="status-details"></ul>
+      </div>
+
+      <section class="counts-strip" aria-label="Collection totals">
+        <div class="count-cell">
+          <span class="count-value" id="count-vocabulary">0</span>
+          <span class="count-label">Vocabulary</span>
+        </div>
+        <div class="count-divider" aria-hidden="true"></div>
+        <div class="count-cell">
+          <span class="count-value" id="count-idioms">0</span>
+          <span class="count-label">Idioms</span>
+        </div>
+        <div class="count-divider" aria-hidden="true"></div>
+        <div class="count-cell">
+          <span class="count-value" id="count-phrasal">0</span>
+          <span class="count-label">Phrasal Verbs</span>
+        </div>
+      </section>
+
+      <section class="recent-section" aria-label="Recently saved entries">
+        <h2 class="section-heading">Recently Saved</h2>
+        <div id="recent-list" class="recent-list">
+          <p class="empty-note">No entries saved yet. Highlight text on any webpage or add one above.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="popup-footer">
+      <button type="button" id="btn-open-library" class="library-btn">
+        Open My CUET Library
+      </button>
+    </footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
