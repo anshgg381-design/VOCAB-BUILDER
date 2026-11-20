@@ -5,9 +5,9 @@
   const form = document.getElementById('settings-form');
   const apiKeyInput = document.getElementById('api-key-input');
   const toggleKeyBtn = document.getElementById('btn-toggle-key');
-  const modelSelect = document.getElementById('model-select');
-  const customModelInput = document.getElementById('custom-model-input');
   const sheetWebhookInput = document.getElementById('sheet-webhook-input');
+  const dailyGoalInput = document.getElementById('daily-goal-input');
+  const highlighterToggle = document.getElementById('highlighter-toggle');
   const saveBtn = document.getElementById('btn-save-settings');
   const testBtn = document.getElementById('btn-test-connection');
   const testSheetBtn = document.getElementById('btn-test-sheet');
@@ -15,29 +15,129 @@
   const scriptCodeEl = document.getElementById('apps-script-code');
   const feedbackBox = document.getElementById('feedback-box');
 
-  const APPS_SCRIPT_TEMPLATE = `function doPost(e) {
+  const APPS_SCRIPT_TEMPLATE = `function readAllCuetRows(ss) {
+  var tabMap = [
+    { category: 'vocabulary', name: 'Words' },
+    { category: 'idioms', name: 'Idioms' },
+    { category: 'phrasalVerbs', name: 'Phrasal Verbs' }
+  ];
+  var rows = [];
+  for (var c = 0; c < tabMap.length; c++) {
+    var cfg = tabMap[c];
+    var sheet = ss.getSheetByName(cfg.name);
+    if (!sheet) continue;
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) continue;
+    var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    for (var i = 0; i < values.length; i++) {
+      var expr = String(values[i][0] || '').trim();
+      var meaning = String(values[i][1] || '').trim();
+      var example = String(values[i][2] || '').trim();
+      if (expr && meaning) {
+        rows.push({
+          category: cfg.category,
+          expression: expr,
+          meaning: meaning,
+          example: example
+        });
+      }
+    }
+  }
+  return rows;
+}
+
+function doGet(e) {
+  var action = e && e.parameter ? e.parameter.action : '';
+  if (action === 'pull') {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: true, rows: readAllCuetRows(ss) }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify({ ok: true, supportsPull: true, status: 'CUET Vocabulary Sheet webhook is active.' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getOrCreateCuetTab(ss, category) {
+  var tabMap = {
+    vocabulary: { name: 'Words', header: 'Word' },
+    idioms: { name: 'Idioms', header: 'Idiom' },
+    phrasalVerbs: { name: 'Phrasal Verbs', header: 'Phrasal Verb' }
+  };
+  var cfg = tabMap[category] || tabMap.vocabulary;
+  var sheet = ss.getSheetByName(cfg.name);
+  if (!sheet) {
+    sheet = ss.insertSheet(cfg.name);
+  }
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([cfg.header, 'Meaning', 'Example Sentence']);
+    sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+  return { sheet: sheet, name: cfg.name };
+}
+
+function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var tabMap = {
-      vocabulary: { name: 'Words', header: 'Word' },
-      idioms: { name: 'Idioms', header: 'Idiom' },
-      phrasalVerbs: { name: 'Phrasal Verbs', header: 'Phrasal Verb' }
-    };
-    var cfg = tabMap[data.category] || tabMap.vocabulary;
 
-    var sheet = ss.getSheetByName(cfg.name);
-    if (!sheet) {
-      sheet = ss.insertSheet(cfg.name);
-    }
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([cfg.header, 'Meaning', 'Example Sentence']);
-      sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
-      sheet.setFrozenRows(1);
+    if (data.action === 'pullAll') {
+      return ContentService
+        .createTextOutput(JSON.stringify({ ok: true, rows: readAllCuetRows(ss) }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
 
+    if (data.action === 'syncBatch' && Array.isArray(data.rows)) {
+      var grouped = { vocabulary: [], idioms: [], phrasalVerbs: [] };
+      for (var i = 0; i < data.rows.length; i++) {
+        var r = data.rows[i] || {};
+        var cat = grouped[r.category] ? r.category : 'vocabulary';
+        var expr = String(r.expression || '').trim();
+        if (expr) {
+          grouped[cat].push([expr, String(r.meaning || '').trim(), String(r.example || '').trim()]);
+        }
+      }
+      var addedCount = 0;
+      var skippedCount = 0;
+      var cats = ['vocabulary', 'idioms', 'phrasalVerbs'];
+      for (var c = 0; c < cats.length; c++) {
+        var items = grouped[cats[c]];
+        if (!items.length) continue;
+        var target = getOrCreateCuetTab(ss, cats[c]).sheet;
+        var lastRow = target.getLastRow();
+        var existing = {};
+        if (lastRow > 1) {
+          var colA = target.getRange(2, 1, lastRow - 1, 1).getValues();
+          for (var k = 0; k < colA.length; k++) {
+            var key = String(colA[k][0] || '').trim().toLowerCase();
+            if (key) existing[key] = true;
+          }
+        }
+        var toInsert = [];
+        for (var j = 0; j < items.length; j++) {
+          var norm = items[j][0].toLowerCase();
+          if (existing[norm]) {
+            skippedCount++;
+          } else {
+            existing[norm] = true;
+            toInsert.push(items[j]);
+          }
+        }
+        if (toInsert.length) {
+          target.getRange(lastRow + 1, 1, toInsert.length, 3).setValues(toInsert);
+          addedCount += toInsert.length;
+        }
+      }
+      return ContentService
+        .createTextOutput(JSON.stringify({ ok: true, addedCount: addedCount, skippedCount: skippedCount }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var res = getOrCreateCuetTab(ss, data.category);
     if (!data.testOnly) {
-      sheet.appendRow([
+      res.sheet.appendRow([
         String(data.expression || '').trim(),
         String(data.meaning || '').trim(),
         String(data.example || '').trim()
@@ -45,7 +145,7 @@
     }
 
     return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, tabName: cfg.name }))
+      .createTextOutput(JSON.stringify({ ok: true, tabName: res.name }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService
@@ -70,16 +170,6 @@
     });
   }
 
-  function populateModels() {
-    modelSelect.innerHTML = '';
-    for (const m of CUETShared.GEMINI_MODELS) {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.label;
-      modelSelect.appendChild(opt);
-    }
-  }
-
   function showFeedback(text, tone) {
     feedbackBox.hidden = false;
     feedbackBox.classList.remove('ok', 'error');
@@ -89,17 +179,18 @@
   }
 
   async function loadSettings() {
-    populateModels();
     try {
       const res = await sendMessage({ type: 'GET_SETTINGS' });
       if (res && res.ok && res.settings) {
         apiKeyInput.value = res.settings.apiKey || '';
-        const savedModel = res.settings.model || CUETShared.DEFAULT_SETTINGS.model;
-        const existsInDropdown = CUETShared.GEMINI_MODELS.some((m) => m.id === savedModel);
-        modelSelect.value = existsInDropdown ? savedModel : CUETShared.DEFAULT_SETTINGS.model;
-        customModelInput.value = res.settings.customModel || (existsInDropdown ? '' : savedModel);
         if (sheetWebhookInput) {
           sheetWebhookInput.value = res.settings.sheetWebhookUrl || '';
+        }
+        if (dailyGoalInput) {
+          dailyGoalInput.value = String(CUETShared.clampDailyGoal(res.settings.dailyGoalTarget));
+        }
+        if (highlighterToggle) {
+          highlighterToggle.checked = res.settings.inPageHighlighter !== false;
         }
       }
     } catch (err) {
@@ -120,19 +211,25 @@
 
     try {
       const sheetWebhookUrl = sheetWebhookInput ? sheetWebhookInput.value.trim() : '';
+      const dailyGoalTarget = dailyGoalInput
+        ? CUETShared.clampDailyGoal(dailyGoalInput.value)
+        : CUETShared.DEFAULT_DAILY_GOAL;
+      const inPageHighlighter = highlighterToggle ? Boolean(highlighterToggle.checked) : true;
       const res = await sendMessage({
         type: 'SAVE_SETTINGS',
         payload: {
           apiKey: apiKeyInput.value.trim(),
-          model: modelSelect.value,
-          customModel: customModelInput.value.trim(),
+          model: CUETShared.GEMINI_MODEL,
           sheetWebhookUrl,
+          dailyGoalTarget,
+          inPageHighlighter,
         },
       });
 
       if (res && res.ok) {
         const sheetNote = sheetWebhookUrl ? ' Google Sheets auto-save enabled.' : '';
-        showFeedback(`Settings saved locally. Active model: ${res.activeModel}.${sheetNote}`, 'ok');
+        const highlightNote = inPageHighlighter ? ' In-page word highlighter ON.' : ' In-page word highlighter OFF.';
+        showFeedback(`Settings saved locally. Active model: ${res.activeModel}.${sheetNote}${highlightNote}`, 'ok');
       } else {
         showFeedback((res && res.error) || 'Failed to save settings.', 'error');
       }
@@ -146,7 +243,7 @@
 
   testBtn.addEventListener('click', async () => {
     const key = apiKeyInput.value.trim();
-    const model = customModelInput.value.trim() || modelSelect.value;
+    const model = CUETShared.GEMINI_MODEL;
 
     if (!key) {
       showFeedback('Enter your Gemini API key before testing the connection.', 'error');

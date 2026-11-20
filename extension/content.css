@@ -1,4 +1,4 @@
-/* CUET Vocabulary Builder — Content Script Host Positioning */
+/* CUET Vocabulary Builder — Content Script Host Positioning & In-Page Highlights */
 #cuet-vocab-host {
   all: initial;
   position: fixed;
@@ -9,3 +9,31 @@
   z-index: 2147483647;
   pointer-events: none;
 }
+
+.cuet-vocab-mark {
+  display: inline;
+  padding: 0 1px;
+  border-radius: 2px;
+  border-bottom: 2px dotted #ea580c;
+  background: rgba(234, 88, 12, 0.06);
+  cursor: help;
+  text-decoration: none;
+  transition: background-color 0.14s ease, border-bottom-color 0.14s ease;
+}
+
+.cuet-vocab-mark[data-cuet-level="learning"] {
+  border-bottom-color: #0f766e;
+  background: rgba(15, 118, 110, 0.06);
+}
+
+.cuet-vocab-mark:hover,
+.cuet-vocab-mark:focus-visible {
+  background: rgba(234, 88, 12, 0.14);
+  outline: none;
+}
+
+.cuet-vocab-mark[data-cuet-level="learning"]:hover,
+.cuet-vocab-mark[data-cuet-level="learning"]:focus-visible {
+  background: rgba(15, 118, 110, 0.14);
+}
+

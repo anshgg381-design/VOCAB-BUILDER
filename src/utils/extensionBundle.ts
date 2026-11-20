@@ -75,7 +75,7 @@ export async function buildExtensionZipBlob(): Promise<{ blob: Blob; fileCount: 
   let fileCount = 0;
 
   for (const file of files) {
-    const zipPath = `cuet-vocabulary-builder/${file.path}`;
+    const zipPath = file.path;
     if (file.isBinary && file.dataUrl) {
       const bytes = dataUrlToBytes(file.dataUrl);
       zip.file(zipPath, bytes, {
@@ -119,7 +119,7 @@ export async function downloadExtensionZip(): Promise<{ fileCount: number; byteS
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'cuet-ug-2027-vocabulary-collector.zip';
+  link.download = 'ipmat-cuet-vocab-builder.zip';
   link.style.display = 'none';
   document.body.appendChild(link);
   link.click();

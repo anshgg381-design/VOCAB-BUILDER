@@ -1,6 +1,4 @@
-import { Category, VocabEntry, normalizeKey } from './vocabLogic';
-
-export const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
+import { Category, PulledSheetRow, VocabEntry } from './vocabLogic';
 
 export const SHEET_TABS: Record<Category, string> = {
   vocabulary: 'Words',
@@ -14,27 +12,6 @@ export const REQUIRED_SHEET_TABS: Array<{ category: Category; title: string; hea
   { category: 'phrasalVerbs', title: 'Phrasal Verbs', headers: ['Phrasal Verb', 'Meaning', 'Example Sentence'] },
 ];
 
-export interface ConnectedSheet {
-  spreadsheetId: string;
-  spreadsheetUrl: string;
-  title: string;
-}
-
-export interface SheetInspection {
-  spreadsheetId: string;
-  spreadsheetUrl: string;
-  title: string;
-  existingTabs: string[];
-  missingTabs: Array<{ category: Category; title: string; headers: [string, string, string] }>;
-}
-
-export class SheetAuthExpiredError extends Error {
-  constructor(message = 'Your Google Sheets session expired. Please sign in with Google again.') {
-    super(message);
-    this.name = 'SheetAuthExpiredError';
-  }
-}
-
 export function getTabNameForCategory(category: Category): string {
   return SHEET_TABS[category] || 'Words';
 }
@@ -43,304 +20,280 @@ export function formatEntrySheetRow(entry: Pick<VocabEntry, 'expression' | 'mean
   return [entry.expression.trim(), entry.meaning.trim(), entry.example.trim()];
 }
 
-export function parseSpreadsheetId(rawInput: string): string | null {
-  if (typeof rawInput !== 'string') return null;
-  const trimmed = rawInput.trim();
-  if (!trimmed) return null;
+export const APPS_SCRIPT_URL_REGEX =
+  /^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec(?:[?#].*)?$/i;
 
-  const urlMatch = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]{15,})/);
-  if (urlMatch) return urlMatch[1];
+export function isValidAppsScriptUrl(rawUrl: string): boolean {
+  if (typeof rawUrl !== 'string') return false;
+  return APPS_SCRIPT_URL_REGEX.test(rawUrl.trim());
+}
 
-  if (/^[a-zA-Z0-9-_]{20,}$/.test(trimmed)) {
-    return trimmed;
+export function validateAppsScriptUrlInput(rawUrl: string): { ok: true; url: string } | { ok: false; error: string } {
+  const trimmed = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+  if (!trimmed) {
+    return { ok: false, error: 'Paste your Google Apps Script Web App URL ending in /exec.' };
+  }
+  if (/script\.google\.com\/.*\/edit/i.test(trimmed)) {
+    return {
+      ok: false,
+      error: 'That is the Apps Script editor (/edit) link. Click Deploy -> New deployment -> Web app and copy the URL ending in /exec.',
+    };
+  }
+  if (!isValidAppsScriptUrl(trimmed)) {
+    return {
+      ok: false,
+      error: 'Invalid URL. It must start with https://script.google.com/macros/s/ and end with /exec.',
+    };
+  }
+  return { ok: true, url: trimmed };
+}
+
+async function postToAppsScript<T>(webhookUrl: string, body: Record<string, unknown>): Promise<T> {
+  const validated = validateAppsScriptUrlInput(webhookUrl);
+  if (!validated.ok) {
+    throw new Error(validated.error);
   }
 
-  return null;
-}
-
-export function buildCreateSpreadsheetPayload(title = 'CUET UG 2027 Vocabulary') {
-  return {
-    properties: { title },
-    sheets: REQUIRED_SHEET_TABS.map((tab, index) => ({
-      properties: {
-        sheetId: index + 1,
-        title: tab.title,
-        gridProperties: {
-          frozenRowCount: 1,
-        },
-      },
-      data: [
-        {
-          startRow: 0,
-          startColumn: 0,
-          rowData: [
-            {
-              values: tab.headers.map((header) => ({
-                userEnteredValue: { stringValue: header },
-                userEnteredFormat: {
-                  textFormat: { bold: true },
-                },
-              })),
-            },
-          ],
-        },
-      ],
-    })),
-  };
-}
-
-function escapeSheetTitle(title: string): string {
-  return `'${title.replace(/'/g, "''")}'`;
-}
-
-async function sheetsFetch<T>(url: string, accessToken: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(init?.headers || {}),
-    },
-  });
-
-  if (res.status === 401) {
-    throw new SheetAuthExpiredError();
-  }
-
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const apiMsg = data?.error?.message || `Google Sheets request failed (HTTP ${res.status}).`;
-    if (res.status === 403) {
-      throw new Error(
-        'Permission denied for this Google Sheet. Make sure you own or have edit access to the spreadsheet.'
-      );
-    }
-    if (res.status === 404) {
-      throw new Error('Google Sheet not found. Double-check the spreadsheet link or ID.');
-    }
-    throw new Error(apiMsg);
-  }
-
-  return data as T;
-}
-
-export async function createVocabularySpreadsheet(
-  accessToken: string,
-  title = 'CUET UG 2027 Vocabulary'
-): Promise<ConnectedSheet> {
-  const payload = buildCreateSpreadsheetPayload(title);
-  const data = await sheetsFetch<{
-    spreadsheetId: string;
-    spreadsheetUrl: string;
-    properties?: { title?: string };
-  }>(SHEETS_API_BASE, accessToken, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-
-  return {
-    spreadsheetId: data.spreadsheetId,
-    spreadsheetUrl:
-      data.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${data.spreadsheetId}/edit`,
-    title: data.properties?.title || title,
-  };
-}
-
-export async function inspectSpreadsheet(
-  accessToken: string,
-  spreadsheetId: string
-): Promise<SheetInspection> {
-  const fields = encodeURIComponent(
-    'spreadsheetId,spreadsheetUrl,properties.title,sheets.properties.title'
-  );
-  const data = await sheetsFetch<{
-    spreadsheetId: string;
-    spreadsheetUrl?: string;
-    properties?: { title?: string };
-    sheets?: Array<{ properties?: { title?: string } }>;
-  }>(`${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}?fields=${fields}`, accessToken);
-
-  const existingTabs = (data.sheets || [])
-    .map((s) => s.properties?.title)
-    .filter((t): t is string => Boolean(t));
-  const existingSet = new Set(existingTabs.map((t) => t.trim().toLowerCase()));
-
-  const missingTabs = REQUIRED_SHEET_TABS.filter(
-    (req) => !existingSet.has(req.title.toLowerCase())
-  );
-
-  return {
-    spreadsheetId: data.spreadsheetId || spreadsheetId,
-    spreadsheetUrl:
-      data.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
-    title: data.properties?.title || 'CUET Vocabulary Sheet',
-    existingTabs,
-    missingTabs,
-  };
-}
-
-export async function ensureSpreadsheetTabsAndHeaders(
-  accessToken: string,
-  inspection: SheetInspection
-): Promise<ConnectedSheet> {
-  const { spreadsheetId, missingTabs } = inspection;
-
-  if (missingTabs.length > 0) {
-    await sheetsFetch(`${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}:batchUpdate`, accessToken, {
+  let response: Response;
+  try {
+    response = await fetch(validated.url, {
       method: 'POST',
-      body: JSON.stringify({
-        requests: missingTabs.map((tab) => ({
-          addSheet: {
-            properties: {
-              title: tab.title,
-              gridProperties: { frozenRowCount: 1 },
-            },
-          },
-        })),
-      }),
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      redirect: 'follow',
+      body: JSON.stringify(body),
     });
-
-    await sheetsFetch(
-      `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
-      accessToken,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          valueInputOption: 'USER_ENTERED',
-          data: missingTabs.map((tab) => ({
-            range: `${escapeSheetTitle(tab.title)}!A1:C1`,
-            values: [tab.headers],
-          })),
-        }),
-      }
+  } catch {
+    throw new Error(
+      'Could not reach your Apps Script URL. Verify "Who has access" is set to "Anyone" and try again.'
     );
   }
 
-  // Ensure existing required tabs have headers if row 1 is empty
-  for (const tab of REQUIRED_SHEET_TABS) {
-    if (missingTabs.some((m) => m.title === tab.title)) continue;
-    const range = encodeURIComponent(`${escapeSheetTitle(tab.title)}!A1:C1`);
-    const existingRow = await sheetsFetch<{ values?: string[][] }>(
-      `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${range}`,
-      accessToken
+  if (!response.ok) {
+    throw new Error(
+      `Apps Script deployment returned HTTP ${response.status}. Confirm you deployed as Web app with "Who has access: Anyone".`
     );
-    if (!existingRow.values || existingRow.values.length === 0 || existingRow.values[0].every((c) => !c.trim())) {
-      await sheetsFetch(
-        `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${range}?valueInputOption=USER_ENTERED`,
-        accessToken,
-        {
-          method: 'PUT',
-          body: JSON.stringify({ values: [tab.headers] }),
-        }
-      );
-    }
   }
 
-  return {
-    spreadsheetId: inspection.spreadsheetId,
-    spreadsheetUrl: inspection.spreadsheetUrl,
-    title: inspection.title,
-  };
+  const rawText = await response.text();
+  let data: (T & { ok?: boolean; error?: string }) | null = null;
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    throw new Error(
+      'Apps Script returned a sign-in page instead of JSON. Re-deploy your Web app with "Execute as: Me" and "Who has access: Anyone".'
+    );
+  }
+
+  if (!data || data.ok === false) {
+    throw new Error(data?.error || 'Apps Script rejected the request.');
+  }
+
+  return data;
 }
 
-export async function appendEntryToSheet(
-  accessToken: string,
-  spreadsheetId: string,
-  entry: Pick<VocabEntry, 'expression' | 'category' | 'meaning' | 'example'>
+export async function appendEntryViaAppsScript(
+  webhookUrl: string,
+  payload: {
+    category: Category;
+    expression: string;
+    meaning: string;
+    example: string;
+    testOnly?: boolean;
+  }
 ): Promise<{ tabName: string }> {
-  const tabName = getTabNameForCategory(entry.category);
-  const range = encodeURIComponent(`${escapeSheetTitle(tabName)}!A:C`);
-  const row = formatEntrySheetRow(entry);
+  const data = await postToAppsScript<{ ok: boolean; tabName?: string }>(webhookUrl, {
+    category: payload.category,
+    expression: payload.expression,
+    meaning: payload.meaning,
+    example: payload.example,
+    testOnly: Boolean(payload.testOnly),
+  });
 
-  await sheetsFetch(
-    `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${range}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-    accessToken,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        values: [row],
-      }),
-    }
-  );
-
-  return { tabName };
+  return { tabName: data.tabName || getTabNameForCategory(payload.category) };
 }
 
-export async function syncLibraryEntriesToSheet(
-  accessToken: string,
-  spreadsheetId: string,
+export async function syncLibraryViaAppsScript(
+  webhookUrl: string,
   entries: VocabEntry[]
 ): Promise<{ addedCount: number; skippedCount: number }> {
-  let addedCount = 0;
-  let skippedCount = 0;
-
-  for (const tab of REQUIRED_SHEET_TABS) {
-    const categoryEntries = entries.filter((e) => e.category === tab.category);
-    if (categoryEntries.length === 0) continue;
-
-    const colARange = encodeURIComponent(`${escapeSheetTitle(tab.title)}!A:A`);
-    const existingRes = await sheetsFetch<{ values?: string[][] }>(
-      `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${colARange}`,
-      accessToken
-    );
-    const existingKeys = new Set(
-      (existingRes.values || [])
-        .map((row) => normalizeKey(row[0] || ''))
-        .filter(Boolean)
-    );
-
-    const rowsToAppend: Array<[string, string, string]> = [];
-    // Append oldest-first so spreadsheet reads chronologically
-    for (const entry of [...categoryEntries].reverse()) {
-      const key = normalizeKey(entry.expression);
-      if (!key || existingKeys.has(key)) {
-        skippedCount++;
-        continue;
-      }
-      existingKeys.add(key);
-      rowsToAppend.push(formatEntrySheetRow(entry));
-    }
-
-    if (rowsToAppend.length > 0) {
-      const appendRange = encodeURIComponent(`${escapeSheetTitle(tab.title)}!A:C`);
-      await sheetsFetch(
-        `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${appendRange}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-        accessToken,
-        {
-          method: 'POST',
-          body: JSON.stringify({ values: rowsToAppend }),
-        }
-      );
-      addedCount += rowsToAppend.length;
-    }
+  if (entries.length === 0) {
+    return { addedCount: 0, skippedCount: 0 };
   }
 
-  return { addedCount, skippedCount };
+  const rows = [...entries].reverse().map((e) => ({
+    category: e.category,
+    expression: e.expression.trim(),
+    meaning: e.meaning.trim(),
+    example: e.example.trim(),
+  }));
+
+  const data = await postToAppsScript<{
+    ok: boolean;
+    addedCount?: number;
+    skippedCount?: number;
+  }>(webhookUrl, {
+    action: 'syncBatch',
+    rows,
+  });
+
+  return {
+    addedCount: typeof data.addedCount === 'number' ? data.addedCount : rows.length,
+    skippedCount: typeof data.skippedCount === 'number' ? data.skippedCount : 0,
+  };
 }
 
-export const BRAVE_APPS_SCRIPT_CODE = `function doPost(e) {
+export async function pullLibraryViaAppsScript(webhookUrl: string): Promise<PulledSheetRow[]> {
+  const data = await postToAppsScript<{
+    ok: boolean;
+    rows?: Array<{
+      category?: Category;
+      expression?: string;
+      meaning?: string;
+      example?: string;
+    }>;
+  }>(webhookUrl, {
+    action: 'pullAll',
+  });
+
+  if (!Array.isArray(data.rows)) {
+    throw new Error(
+      'Your deployed Apps Script is an older version without Pull support. Copy the updated script from Sheet Template & Setup and deploy a new Web app version.'
+    );
+  }
+
+  return data.rows
+    .map((r) => ({
+      category: r?.category,
+      expression: String(r?.expression || '').trim(),
+      meaning: String(r?.meaning || '').trim(),
+      example: String(r?.example || '').trim(),
+    }))
+    .filter((r) => Boolean(r.expression && r.meaning));
+}
+
+export const BRAVE_APPS_SCRIPT_CODE = `function readAllCuetRows(ss) {
+  var tabMap = [
+    { category: 'vocabulary', name: 'Words' },
+    { category: 'idioms', name: 'Idioms' },
+    { category: 'phrasalVerbs', name: 'Phrasal Verbs' }
+  ];
+  var rows = [];
+  for (var c = 0; c < tabMap.length; c++) {
+    var cfg = tabMap[c];
+    var sheet = ss.getSheetByName(cfg.name);
+    if (!sheet) continue;
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) continue;
+    var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    for (var i = 0; i < values.length; i++) {
+      var expr = String(values[i][0] || '').trim();
+      var meaning = String(values[i][1] || '').trim();
+      var example = String(values[i][2] || '').trim();
+      if (expr && meaning) {
+        rows.push({
+          category: cfg.category,
+          expression: expr,
+          meaning: meaning,
+          example: example
+        });
+      }
+    }
+  }
+  return rows;
+}
+
+function doGet(e) {
+  var action = e && e.parameter ? e.parameter.action : '';
+  if (action === 'pull') {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: true, rows: readAllCuetRows(ss) }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify({ ok: true, supportsPull: true, status: 'CUET Vocabulary Sheet webhook is active.' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getOrCreateCuetTab(ss, category) {
+  var tabMap = {
+    vocabulary: { name: 'Words', header: 'Word' },
+    idioms: { name: 'Idioms', header: 'Idiom' },
+    phrasalVerbs: { name: 'Phrasal Verbs', header: 'Phrasal Verb' }
+  };
+  var cfg = tabMap[category] || tabMap.vocabulary;
+  var sheet = ss.getSheetByName(cfg.name);
+  if (!sheet) {
+    sheet = ss.insertSheet(cfg.name);
+  }
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([cfg.header, 'Meaning', 'Example Sentence']);
+    sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+  return { sheet: sheet, name: cfg.name };
+}
+
+function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var tabMap = {
-      vocabulary: { name: 'Words', header: 'Word' },
-      idioms: { name: 'Idioms', header: 'Idiom' },
-      phrasalVerbs: { name: 'Phrasal Verbs', header: 'Phrasal Verb' }
-    };
-    var cfg = tabMap[data.category] || tabMap.vocabulary;
 
-    var sheet = ss.getSheetByName(cfg.name);
-    if (!sheet) {
-      sheet = ss.insertSheet(cfg.name);
-    }
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([cfg.header, 'Meaning', 'Example Sentence']);
-      sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
-      sheet.setFrozenRows(1);
+    if (data.action === 'pullAll') {
+      return ContentService
+        .createTextOutput(JSON.stringify({ ok: true, rows: readAllCuetRows(ss) }))
+        .setMimeType(ContentService.MimeType.JSON);
     }
 
+    if (data.action === 'syncBatch' && Array.isArray(data.rows)) {
+      var grouped = { vocabulary: [], idioms: [], phrasalVerbs: [] };
+      for (var i = 0; i < data.rows.length; i++) {
+        var r = data.rows[i] || {};
+        var cat = grouped[r.category] ? r.category : 'vocabulary';
+        var expr = String(r.expression || '').trim();
+        if (expr) {
+          grouped[cat].push([expr, String(r.meaning || '').trim(), String(r.example || '').trim()]);
+        }
+      }
+      var addedCount = 0;
+      var skippedCount = 0;
+      var cats = ['vocabulary', 'idioms', 'phrasalVerbs'];
+      for (var c = 0; c < cats.length; c++) {
+        var items = grouped[cats[c]];
+        if (!items.length) continue;
+        var target = getOrCreateCuetTab(ss, cats[c]).sheet;
+        var lastRow = target.getLastRow();
+        var existing = {};
+        if (lastRow > 1) {
+          var colA = target.getRange(2, 1, lastRow - 1, 1).getValues();
+          for (var k = 0; k < colA.length; k++) {
+            var key = String(colA[k][0] || '').trim().toLowerCase();
+            if (key) existing[key] = true;
+          }
+        }
+        var toInsert = [];
+        for (var j = 0; j < items.length; j++) {
+          var norm = items[j][0].toLowerCase();
+          if (existing[norm]) {
+            skippedCount++;
+          } else {
+            existing[norm] = true;
+            toInsert.push(items[j]);
+          }
+        }
+        if (toInsert.length) {
+          target.getRange(lastRow + 1, 1, toInsert.length, 3).setValues(toInsert);
+          addedCount += toInsert.length;
+        }
+      }
+      return ContentService
+        .createTextOutput(JSON.stringify({ ok: true, addedCount: addedCount, skippedCount: skippedCount }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var res = getOrCreateCuetTab(ss, data.category);
     if (!data.testOnly) {
-      sheet.appendRow([
+      res.sheet.appendRow([
         String(data.expression || '').trim(),
         String(data.meaning || '').trim(),
         String(data.example || '').trim()
@@ -348,7 +301,7 @@ export const BRAVE_APPS_SCRIPT_CODE = `function doPost(e) {
     }
 
     return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, tabName: cfg.name }))
+      .createTextOutput(JSON.stringify({ ok: true, tabName: res.name }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService

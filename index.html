@@ -3,19 +3,25 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CUET UG 2027 Vocabulary Collector — Brave Extension</title>
-    <meta name="description" content="Complete Brave browser Manifest V3 extension for collecting English words, idioms, and phrasal verbs with simple Gemini-powered meanings, one example sentence, and local storage." />
-    <meta property="og:title" content="CUET UG 2027 Vocabulary Collector — Brave Extension" />
-    <meta property="og:description" content="Complete Brave browser Manifest V3 extension for collecting English words, idioms, and phrasal verbs with simple Gemini-powered meanings, one example sentence, and local storage." />
+    <title>IPMAT/CUET VOCAB BUILDER</title>
+    <meta name="description" content="IPMAT/CUET VOCAB BUILDER — Manifest V3 browser extension (Chrome, Brave, Edge, Vivaldi, Opera, Arc, Chromium) and interactive library for English words, idioms, and phrasal verbs with Gemini meanings, flashcards, quizzes, PDF study sheets, and Google Sheets sync." />
+    <meta property="og:title" content="IPMAT/CUET VOCAB BUILDER" />
+    <meta property="og:description" content="IPMAT/CUET VOCAB BUILDER — Manifest V3 browser extension (Chrome, Brave, Edge, Vivaldi, Opera, Arc, Chromium) and interactive library for English words, idioms, and phrasal verbs." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,400&family=IBM+Plex+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+      try {
+        if (window.localStorage.getItem('cuet_theme_mode_v1') === 'dark') {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
   </head>
-  <body class="bg-[#F8FAFC] text-[#111827] antialiased">
+  <body class="bg-[#F5F3F0] dark:bg-[#0B1220] text-[#002962] dark:text-[#E8EEF7] antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

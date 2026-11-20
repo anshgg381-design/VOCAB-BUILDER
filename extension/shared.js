@@ -22,11 +22,18 @@
 
   const VALID_CATEGORIES = ['vocabulary', 'idioms', 'phrasalVerbs'];
 
+  const VALID_MASTERY_LEVELS = ['new', 'learning', 'mastered'];
+
+  const MASTERY_LABELS = {
+    new: 'New',
+    learning: 'Learning',
+    mastered: 'Mastered',
+  };
+
+  const GEMINI_MODEL = 'gemini-3.1-flash-lite';
+
   const GEMINI_MODELS = [
-    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Recommended — Fast & Accurate)' },
-    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite (Fastest & Lightweight)' },
-    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Highest Nuance)' },
-    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview' },
+    { id: GEMINI_MODEL, label: 'Gemini 3.1 Flash Lite' },
   ];
 
   const SHEET_TABS = {
@@ -35,11 +42,18 @@
     phrasalVerbs: 'Phrasal Verbs',
   };
 
+  const QUIZ_MIN_QUESTIONS = 5;
+  const QUIZ_MAX_QUESTIONS = 20;
+  const DEFAULT_DAILY_GOAL = 5;
+  const MIN_DAILY_GOAL = 1;
+  const MAX_DAILY_GOAL = 50;
+
   const DEFAULT_SETTINGS = {
     apiKey: '',
-    model: 'gemini-2.5-flash',
-    customModel: '',
+    model: GEMINI_MODEL,
     sheetWebhookUrl: '',
+    dailyGoalTarget: DEFAULT_DAILY_GOAL,
+    inPageHighlighter: true,
   };
 
   const PHRASAL_PARTICLES = new Set([
@@ -426,6 +440,484 @@
     return counts;
   }
 
+  function getMasteryLevel(entry) {
+    if (entry && VALID_MASTERY_LEVELS.includes(entry.masteryLevel)) {
+      return entry.masteryLevel;
+    }
+    return entry && entry.learned ? 'mastered' : 'new';
+  }
+
+  function getMasteryStats(entries) {
+    const list = Array.isArray(entries) ? entries : [];
+    let newCount = 0;
+    let learningCount = 0;
+    let masteredCount = 0;
+
+    for (const entry of list) {
+      const level = getMasteryLevel(entry);
+      if (level === 'mastered') masteredCount++;
+      else if (level === 'learning') learningCount++;
+      else newCount++;
+    }
+
+    const total = list.length;
+    const percentMastered = total === 0 ? 0 : Math.round((masteredCount / total) * 100);
+    const percentLearning = total === 0 ? 0 : Math.round((learningCount / total) * 100);
+
+    return {
+      total,
+      newCount,
+      learningCount,
+      masteredCount,
+      percentMastered,
+      percentLearning,
+    };
+  }
+
+  const MASTERY_BADGES = [
+    {
+      id: 'novice',
+      title: 'Novice',
+      threshold: 1,
+      description: 'Master your first word, idiom, or phrasal verb',
+    },
+    {
+      id: 'word_collector',
+      title: 'Word Collector',
+      threshold: 5,
+      description: 'Master 5 saved expressions',
+    },
+    {
+      id: 'vocabulary_scholar',
+      title: 'Vocabulary Scholar',
+      threshold: 15,
+      description: 'Master 15 saved expressions',
+    },
+    {
+      id: 'lexicon_tactician',
+      title: 'Lexicon Tactician',
+      threshold: 30,
+      description: 'Master 30 saved expressions',
+    },
+    {
+      id: 'master_learner',
+      title: 'Master Learner',
+      threshold: 50,
+      description: 'Master 50 saved expressions',
+    },
+  ];
+
+  function getMasteryBadgeProgress(entries) {
+    const stats = getMasteryStats(entries);
+    const masteredCount = stats.masteredCount;
+    const badges = MASTERY_BADGES.map((badge) => {
+      const unlocked = masteredCount >= badge.threshold;
+      const remaining = Math.max(0, badge.threshold - masteredCount);
+      const progressPercent = Math.min(100, Math.round((masteredCount / badge.threshold) * 100));
+      return {
+        id: badge.id,
+        title: badge.title,
+        threshold: badge.threshold,
+        description: badge.description,
+        unlocked,
+        progressPercent,
+        remaining,
+      };
+    });
+
+    const unlockedBadges = badges.filter((b) => b.unlocked);
+    const currentBadge = unlockedBadges.length > 0 ? unlockedBadges[unlockedBadges.length - 1] : null;
+    const nextBadge = badges.find((b) => !b.unlocked) || null;
+
+    return {
+      masteredCount,
+      unlockedCount: unlockedBadges.length,
+      totalBadges: badges.length,
+      currentBadge,
+      nextBadge,
+      badges,
+    };
+  }
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  function getReviewIntervalDays(masteryLevel, reviewCount) {
+    const safeCount =
+      typeof reviewCount === 'number' && Number.isFinite(reviewCount) && reviewCount > 0
+        ? Math.floor(reviewCount)
+        : 0;
+    if (masteryLevel === 'new') return 1;
+    if (masteryLevel === 'learning') return safeCount >= 2 ? 4 : 3;
+    if (safeCount >= 3) return 30;
+    if (safeCount === 2) return 14;
+    return 7;
+  }
+
+  function createInitialReviewSchedule(now) {
+    const safeNow = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+    return {
+      lastReviewedAt: safeNow.toISOString(),
+      reviewCount: 0,
+      reviewIntervalDays: 1,
+      nextReviewAt: new Date(safeNow.getTime() + DAY_MS).toISOString(),
+    };
+  }
+
+  function previewReviewIntervals(entry) {
+    const currentCount =
+      entry && typeof entry.reviewCount === 'number' && Number.isFinite(entry.reviewCount) && entry.reviewCount >= 0
+        ? Math.floor(entry.reviewCount)
+        : 0;
+    const nextCount = currentCount + 1;
+    return {
+      needsReviewDays: getReviewIntervalDays('learning', nextCount),
+      masteredDays: getReviewIntervalDays('mastered', nextCount),
+    };
+  }
+
+  function calculateReviewPatch(entry, nextMastery, options) {
+    const opts = options || {};
+    const now =
+      opts.now instanceof Date && !Number.isNaN(opts.now.getTime()) ? opts.now : new Date();
+    const currentCount =
+      entry && typeof entry.reviewCount === 'number' && Number.isFinite(entry.reviewCount) && entry.reviewCount >= 0
+        ? Math.floor(entry.reviewCount)
+        : 0;
+
+    let nextCount;
+    if (nextMastery === 'new') {
+      nextCount = 0;
+    } else if (opts.countAsReview === false) {
+      nextCount = currentCount;
+    } else {
+      nextCount = currentCount + 1;
+    }
+
+    const intervalDays = getReviewIntervalDays(nextMastery, nextCount);
+    return {
+      masteryLevel: nextMastery,
+      learned: nextMastery === 'mastered',
+      lastReviewedAt: now.toISOString(),
+      reviewCount: nextCount,
+      reviewIntervalDays: intervalDays,
+      nextReviewAt: new Date(now.getTime() + intervalDays * DAY_MS).toISOString(),
+    };
+  }
+
+  function getEntryReviewSchedule(entry, now) {
+    const safeNow = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+    const masteryLevel = getMasteryLevel(entry || {});
+    const reviewCount =
+      entry && typeof entry.reviewCount === 'number' && Number.isFinite(entry.reviewCount) && entry.reviewCount >= 0
+        ? Math.floor(entry.reviewCount)
+        : 0;
+    const intervalDays =
+      entry &&
+      typeof entry.reviewIntervalDays === 'number' &&
+      Number.isFinite(entry.reviewIntervalDays) &&
+      entry.reviewIntervalDays > 0
+        ? Math.round(entry.reviewIntervalDays)
+        : getReviewIntervalDays(masteryLevel, reviewCount);
+
+    let nextReviewAt;
+    if (entry && typeof entry.nextReviewAt === 'string' && !Number.isNaN(Date.parse(entry.nextReviewAt))) {
+      nextReviewAt = entry.nextReviewAt;
+    } else {
+      const anchorStr =
+        entry && typeof entry.lastReviewedAt === 'string' && !Number.isNaN(Date.parse(entry.lastReviewedAt))
+          ? entry.lastReviewedAt
+          : entry && entry.dateAdded;
+      const anchorMs = Date.parse(anchorStr || '');
+      const baseMs = Number.isNaN(anchorMs) ? safeNow.getTime() : anchorMs;
+      nextReviewAt = new Date(baseMs + intervalDays * DAY_MS).toISOString();
+    }
+
+    const dueDate = new Date(nextReviewAt);
+    const startOfToday = new Date(safeNow.getFullYear(), safeNow.getMonth(), safeNow.getDate(), 0, 0, 0, 0);
+    const endOfToday = new Date(safeNow.getFullYear(), safeNow.getMonth(), safeNow.getDate(), 23, 59, 59, 999);
+    const startOfDueDay = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate(), 0, 0, 0, 0);
+
+    const isDueToday = dueDate.getTime() <= endOfToday.getTime();
+    const isOverdue = startOfDueDay.getTime() < startOfToday.getTime();
+    const overdueDays = isOverdue
+      ? Math.max(1, Math.round((startOfToday.getTime() - startOfDueDay.getTime()) / DAY_MS))
+      : 0;
+    const daysUntilDue = !isDueToday
+      ? Math.max(1, Math.round((startOfDueDay.getTime() - startOfToday.getTime()) / DAY_MS))
+      : 0;
+
+    let scheduleLabel;
+    if (isOverdue) {
+      scheduleLabel = overdueDays === 1 ? 'Overdue by 1d' : `Overdue by ${overdueDays}d`;
+    } else if (isDueToday) {
+      scheduleLabel = 'Due today';
+    } else if (daysUntilDue === 1) {
+      scheduleLabel = 'Due tomorrow';
+    } else {
+      scheduleLabel = `Next review in ${daysUntilDue}d`;
+    }
+
+    return {
+      masteryLevel,
+      reviewCount,
+      intervalDays,
+      nextReviewAt,
+      isDueToday,
+      isOverdue,
+      overdueDays,
+      daysUntilDue,
+      scheduleLabel,
+    };
+  }
+
+  function getDailyReviewQueue(entries, now) {
+    const safeNow = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+    const list = Array.isArray(entries) ? entries : [];
+    const priority = { new: 0, learning: 1, mastered: 2 };
+    const dueItems = [];
+    const upcomingItems = [];
+
+    for (const entry of list) {
+      const schedule = getEntryReviewSchedule(entry, safeNow);
+      if (schedule.isDueToday) {
+        dueItems.push({ entry, schedule });
+      } else {
+        upcomingItems.push({ entry, schedule });
+      }
+    }
+
+    dueItems.sort((a, b) => {
+      const dueDiff = Date.parse(a.schedule.nextReviewAt) - Date.parse(b.schedule.nextReviewAt);
+      if (dueDiff !== 0) return dueDiff;
+      const pDiff = priority[a.schedule.masteryLevel] - priority[b.schedule.masteryLevel];
+      if (pDiff !== 0) return pDiff;
+      return Date.parse(a.entry.dateAdded || '') - Date.parse(b.entry.dateAdded || '');
+    });
+
+    upcomingItems.sort(
+      (a, b) => Date.parse(a.schedule.nextReviewAt) - Date.parse(b.schedule.nextReviewAt)
+    );
+
+    const overdueCount = dueItems.filter((item) => item.schedule.isOverdue).length;
+    const dueTodayCount = dueItems.length - overdueCount;
+
+    return {
+      dueEntries: dueItems.map((item) => item.entry),
+      dueItems,
+      upcomingItems,
+      totalDue: dueItems.length,
+      overdueCount,
+      dueTodayCount,
+      nextUpcomingItem: upcomingItems[0] || null,
+    };
+  }
+
+  function getStudyMasteryForOutcome(outcome) {
+    return outcome === 'known' ? 'mastered' : 'learning';
+  }
+
+  function buildStudyDeck(entries, scope, now) {
+    const list = Array.isArray(entries) ? entries : [];
+    const targetScope = scope || 'all';
+    if (targetScope === 'dailyReview') {
+      return getDailyReviewQueue(list, now).dueEntries;
+    }
+
+    let filtered;
+    if (targetScope === 'all') {
+      filtered = [...list];
+    } else if (targetScope === 'needsReview') {
+      filtered = list.filter((e) => getMasteryLevel(e) !== 'mastered');
+    } else {
+      filtered = list.filter((e) => e.category === targetScope);
+    }
+
+    const priority = { new: 0, learning: 1, mastered: 2 };
+    return filtered.sort((a, b) => {
+      const pa = priority[getMasteryLevel(a)];
+      const pb = priority[getMasteryLevel(b)];
+      if (pa !== pb) return pa - pb;
+      return Date.parse(b.dateAdded || '') - Date.parse(a.dateAdded || '');
+    });
+  }
+
+  const FALLBACK_QUIZ_DISTRACTORS = [
+    'Happening occasionally without any clear pattern or plan.',
+    'To delay a decision until more reliable facts are available.',
+    'Showing calm patience when facing a sudden setback.',
+    'To explain a complex rule in a brief, direct manner.',
+    'Relating to ideas that are based on theory rather than everyday practice.',
+    'To withdraw quietly from an agreement or public discussion.',
+  ];
+
+  function shuffleWithRng(items, rng) {
+    const copy = [...items];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = copy[i];
+      copy[i] = copy[j];
+      copy[j] = tmp;
+    }
+    return copy;
+  }
+
+  function getQuizEligibleEntries(entries) {
+    const list = Array.isArray(entries) ? entries : [];
+    return list.filter((e) => {
+      const level = getMasteryLevel(e);
+      return level === 'new' || level === 'learning';
+    });
+  }
+
+  function generateQuizQuestions(allEntries, options) {
+    const opts = options || {};
+    const rng = typeof opts.rng === 'function' ? opts.rng : Math.random;
+    const list = Array.isArray(allEntries) ? allEntries : [];
+    const eligible = getQuizEligibleEntries(list);
+
+    if (eligible.length < QUIZ_MIN_QUESTIONS) {
+      return {
+        ok: false,
+        error: `You need at least ${QUIZ_MIN_QUESTIONS} "New" or "Learning" entries to start a quiz (currently ${eligible.length}).`,
+      };
+    }
+
+    let chosen;
+    if (opts.mode === 'custom') {
+      const idSet = new Set(Array.isArray(opts.selectedIds) ? opts.selectedIds : []);
+      chosen = eligible.filter((e) => idSet.has(e.id));
+      if (chosen.length < QUIZ_MIN_QUESTIONS) {
+        return {
+          ok: false,
+          error: `Select at least ${QUIZ_MIN_QUESTIONS} entries to start a custom quiz.`,
+        };
+      }
+      if (chosen.length > QUIZ_MAX_QUESTIONS) {
+        return {
+          ok: false,
+          error: `You can select at most ${QUIZ_MAX_QUESTIONS} entries per quiz.`,
+        };
+      }
+      chosen = shuffleWithRng(chosen, rng);
+    } else {
+      const maxAllowed = Math.min(QUIZ_MAX_QUESTIONS, eligible.length);
+      const requested = typeof opts.count === 'number' ? Math.round(opts.count) : QUIZ_MIN_QUESTIONS;
+      const clampedCount = Math.max(QUIZ_MIN_QUESTIONS, Math.min(maxAllowed, requested));
+      chosen = shuffleWithRng(eligible, rng).slice(0, clampedCount);
+    }
+
+    const questions = chosen.map((entry, idx) => {
+      const correctMeaning = String(entry.meaning || '').trim();
+      const seenMeanings = new Set([correctMeaning.toLowerCase()]);
+
+      const sameCatPool = shuffleWithRng(
+        list.filter((other) => other.id !== entry.id && other.category === entry.category),
+        rng
+      );
+      const otherCatPool = shuffleWithRng(
+        list.filter((other) => other.id !== entry.id && other.category !== entry.category),
+        rng
+      );
+
+      const distractors = [];
+      for (const candidate of [...sameCatPool, ...otherCatPool]) {
+        if (distractors.length >= 3) break;
+        const m = String(candidate.meaning || '').trim();
+        const key = m.toLowerCase();
+        if (m && !seenMeanings.has(key)) {
+          seenMeanings.add(key);
+          distractors.push(m);
+        }
+      }
+
+      if (distractors.length < 3) {
+        for (const fallback of shuffleWithRng(FALLBACK_QUIZ_DISTRACTORS, rng)) {
+          if (distractors.length >= 3) break;
+          const key = fallback.toLowerCase();
+          if (!seenMeanings.has(key)) {
+            seenMeanings.add(key);
+            distractors.push(fallback);
+          }
+        }
+      }
+
+      const shuffledOptions = shuffleWithRng([correctMeaning, ...distractors.slice(0, 3)], rng);
+      const correctIndex = shuffledOptions.indexOf(correctMeaning);
+
+      return {
+        id: `q_${idx}_${entry.id}`,
+        entryId: entry.id,
+        expression: entry.expression,
+        category: entry.category,
+        masteryLevel: getMasteryLevel(entry),
+        example: entry.example,
+        options: shuffledOptions,
+        correctIndex,
+        correctMeaning,
+      };
+    });
+
+    return { ok: true, questions };
+  }
+
+  function getLocalDateKey(input) {
+    const date = input instanceof Date ? input : new Date(input || Date.now());
+    if (Number.isNaN(date.getTime())) return '';
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function clampDailyGoal(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return DEFAULT_DAILY_GOAL;
+    return Math.max(MIN_DAILY_GOAL, Math.min(MAX_DAILY_GOAL, Math.round(num)));
+  }
+
+  function computeDailyGoalStats(entries, rawTarget, now) {
+    const refNow = now instanceof Date ? now : new Date();
+    const target = clampDailyGoal(rawTarget);
+    const countsByDay = new Map();
+
+    for (const entry of entries || []) {
+      const key = getLocalDateKey(entry.dateAdded);
+      if (!key) continue;
+      countsByDay.set(key, (countsByDay.get(key) || 0) + 1);
+    }
+
+    const todayKey = getLocalDateKey(refNow);
+    const savedToday = countsByDay.get(todayKey) || 0;
+    const goalReached = savedToday >= target;
+    const progressPercent = Math.min(100, Math.round((savedToday / target) * 100));
+
+    let streakDays = 0;
+    const cursor = new Date(refNow.getFullYear(), refNow.getMonth(), refNow.getDate());
+    if (!goalReached) {
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    while (true) {
+      const key = getLocalDateKey(cursor);
+      const count = countsByDay.get(key) || 0;
+      if (count >= target) {
+        streakDays++;
+        cursor.setDate(cursor.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+
+    return {
+      target,
+      savedToday,
+      goalReached,
+      progressPercent,
+      streakDays,
+      todayKey,
+    };
+  }
+
   function buildGeminiPrompt(expression, category, contextSentence) {
     const categoryLabel = CATEGORY_SINGULAR[category] || 'Expression';
     const hasContext = Boolean(contextSentence && contextSentence.trim().length > 0);
@@ -515,6 +1007,12 @@
         ? raw.dateAdded
         : new Date().toISOString();
 
+    const masteryLevel = VALID_MASTERY_LEVELS.includes(raw.masteryLevel)
+      ? raw.masteryLevel
+      : raw.learned
+        ? 'mastered'
+        : 'new';
+
     return {
       id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : generateId(),
       expression,
@@ -525,8 +1023,21 @@
       sourceTitle: typeof raw.sourceTitle === 'string' ? raw.sourceTitle.trim() : '',
       sourceUrl: typeof raw.sourceUrl === 'string' ? raw.sourceUrl.trim() : '',
       dateAdded,
-      learned: Boolean(raw.learned),
+      learned: masteryLevel === 'mastered',
+      masteryLevel,
       favourite: Boolean(raw.favourite),
+      ...(typeof raw.nextReviewAt === 'string' && !Number.isNaN(Date.parse(raw.nextReviewAt))
+        ? { nextReviewAt: raw.nextReviewAt }
+        : {}),
+      ...(typeof raw.lastReviewedAt === 'string' && !Number.isNaN(Date.parse(raw.lastReviewedAt))
+        ? { lastReviewedAt: raw.lastReviewedAt }
+        : {}),
+      ...(typeof raw.reviewIntervalDays === 'number' && raw.reviewIntervalDays > 0
+        ? { reviewIntervalDays: Math.round(raw.reviewIntervalDays) }
+        : {}),
+      ...(typeof raw.reviewCount === 'number' && raw.reviewCount >= 0
+        ? { reviewCount: Math.floor(raw.reviewCount) }
+        : {}),
     };
   }
 
@@ -536,18 +1047,13 @@
       : [];
 
     // NEVER include apiKey in exported backups
-    const safeModel =
-      settings && typeof settings.model === 'string' && settings.model
-        ? settings.model
-        : DEFAULT_SETTINGS.model;
-
     return {
-      app: 'CUET Vocabulary Builder',
+      app: 'IPMAT/CUET VOCAB BUILDER',
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
       counts: getCategoryCounts(safeEntries),
       preferences: {
-        model: safeModel,
+        model: GEMINI_MODEL,
       },
       entries: safeEntries,
     };
@@ -651,31 +1157,80 @@
   }
 
   function buildCsv(entries) {
-    const headers = [
-      'Expression',
-      'Category',
-      'Meaning',
-      'Example',
-      'Date Added',
-      'Learned',
-      'Favourite',
-    ];
+    const headers = ['Word', 'Meaning', 'Example Sentence'];
     const lines = [headers.map(escapeCsvCell).join(',')];
 
     for (const entry of entries || []) {
       const row = [
         entry.expression || '',
-        CATEGORIES[entry.category] || entry.category || '',
         entry.meaning || '',
         entry.example || '',
-        formatDate(entry.dateAdded),
-        entry.learned ? 'Yes' : 'No',
-        entry.favourite ? 'Yes' : 'No',
       ];
       lines.push(row.map(escapeCsvCell).join(','));
     }
 
     return lines.join('\r\n');
+  }
+
+  function getCategoryInsightData(entries) {
+    const list = Array.isArray(entries) ? entries : [];
+    const meta = [
+      { category: 'vocabulary', label: 'Words' },
+      { category: 'idioms', label: 'Idioms' },
+      { category: 'phrasalVerbs', label: 'Phrasal Verbs' },
+    ];
+    return meta.map((item) => {
+      const subset = list.filter((e) => e.category === item.category);
+      let mastered = 0;
+      let learning = 0;
+      let newCount = 0;
+      for (const entry of subset) {
+        const level = getMasteryLevel(entry);
+        if (level === 'mastered') mastered++;
+        else if (level === 'learning') learning++;
+        else newCount++;
+      }
+      const total = subset.length;
+      const percentMastered = total > 0 ? Math.round((mastered / total) * 100) : 0;
+      return {
+        category: item.category,
+        label: item.label,
+        total,
+        mastered,
+        learning,
+        newCount,
+        percentMastered,
+      };
+    });
+  }
+
+  function getMasteryDistributionData(entries) {
+    const stats = getMasteryStats(entries);
+    const pct = (n) => (stats.total > 0 ? Math.round((n / stats.total) * 100) : 0);
+    return [
+      { level: 'new', label: 'New', count: stats.newCount, percent: pct(stats.newCount) },
+      { level: 'learning', label: 'Learning', count: stats.learningCount, percent: pct(stats.learningCount) },
+      { level: 'mastered', label: 'Mastered', count: stats.masteredCount, percent: pct(stats.masteredCount) },
+    ];
+  }
+
+  function formatEntryCopyText(entry) {
+    if (!entry) return '';
+    const expr = String(entry.expression || '').trim();
+    const meaning = String(entry.meaning || '').trim();
+    const example = String(entry.example || '').trim();
+    return `${expr} — ${meaning}${example ? ` (Example: ${example})` : ''}`;
+  }
+
+  function getToolbarBadgeText(entries, dailyGoalTarget, now) {
+    const stats = computeDailyGoalStats(entries, dailyGoalTarget, now);
+    if (stats.savedToday <= 0) {
+      return { text: '', isGoalReached: false };
+    }
+    return {
+      text: stats.goalReached ? '✓' : String(stats.savedToday),
+      isGoalReached: stats.goalReached,
+    };
   }
 
   function formatDate(isoString) {
@@ -696,11 +1251,527 @@
     return 'cuet_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9);
   }
 
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function sanitizeTsvCell(value) {
+    return String(value == null ? '' : value)
+      .replace(/\t+/g, ' ')
+      .replace(/\r?\n+/g, ' ')
+      .trim();
+  }
+
+  function buildAnkiTsv(entries) {
+    const directives = ['#separator:tab', '#html:true', '#tags column:3'];
+    const lines = [...directives];
+
+    for (const entry of entries || []) {
+      const expr = sanitizeTsvCell(entry.expression || '');
+      if (!expr) continue;
+      const meaning = escapeHtml(sanitizeTsvCell(entry.meaning || ''));
+      const example = escapeHtml(sanitizeTsvCell(entry.example || ''));
+      const front = escapeHtml(expr);
+      const back =
+        '<strong>Meaning:</strong> ' +
+        meaning +
+        (example ? '<br><br><strong>Example:</strong> ' + example : '');
+      const catTag = entry.category === 'phrasalVerbs' ? 'phrasal_verbs' : (entry.category || 'vocabulary');
+      const level = getMasteryLevel(entry);
+      const tags = ['cuet', 'ipmat', catTag, level];
+      if (entry.favourite) tags.push('favourite');
+      lines.push([front, back, tags.join(' ')].join('\t'));
+    }
+
+    return lines.join('\n');
+  }
+
+  function mergePulledSheetEntries(existingEntries, pulledRows, nowIso) {
+    const base = Array.isArray(existingEntries) ? existingEntries.map((e) => ({ ...e })) : [];
+    const indexByKey = new Map();
+    const existingIds = new Set();
+
+    base.forEach((e, idx) => {
+      const key = normalizeKey(e.expression);
+      if (key && !indexByKey.has(key)) indexByKey.set(key, idx);
+      if (e.id) existingIds.add(e.id);
+    });
+
+    const timestamp = nowIso && !Number.isNaN(Date.parse(nowIso)) ? nowIso : new Date().toISOString();
+    let addedCount = 0;
+    let updatedCount = 0;
+    let unchangedCount = 0;
+    let skippedCount = 0;
+    const seenIncoming = new Set();
+
+    for (const row of pulledRows || []) {
+      if (!row || typeof row !== 'object') {
+        skippedCount++;
+        continue;
+      }
+      const expression = normalizeExpression(String(row.expression || ''));
+      const meaning = typeof row.meaning === 'string' ? row.meaning.trim() : '';
+      const example = typeof row.example === 'string' ? row.example.trim() : '';
+      if (!expression || !meaning) {
+        skippedCount++;
+        continue;
+      }
+
+      const lowerExpr = expression.toLowerCase();
+      if (
+        (lowerExpr === 'word' || lowerExpr === 'idiom' || lowerExpr === 'phrasal verb') &&
+        meaning.toLowerCase() === 'meaning'
+      ) {
+        skippedCount++;
+        continue;
+      }
+
+      const key = normalizeKey(expression);
+      if (!key || seenIncoming.has(key)) {
+        skippedCount++;
+        continue;
+      }
+      seenIncoming.add(key);
+
+      const resolvedCategory = VALID_CATEGORIES.includes(row.category)
+        ? row.category
+        : detectCategory(expression);
+
+      if (indexByKey.has(key)) {
+        const idx = indexByKey.get(key);
+        const current = base[idx];
+        const nextMeaning = meaning || current.meaning;
+        const nextExample = example || current.example;
+        if (nextMeaning !== current.meaning || nextExample !== current.example) {
+          base[idx] = {
+            ...current,
+            meaning: nextMeaning,
+            example: nextExample,
+          };
+          updatedCount++;
+        } else {
+          unchangedCount++;
+        }
+      } else {
+        let id = generateId();
+        while (existingIds.has(id)) id = generateId();
+        existingIds.add(id);
+        const created = {
+          id,
+          expression,
+          category: resolvedCategory,
+          meaning,
+          example: example || `Saved "${expression}" from Google Sheets.`,
+          contextSentence: '',
+          sourceTitle: 'Google Sheets Sync',
+          sourceUrl: '',
+          dateAdded: timestamp,
+          learned: false,
+          masteryLevel: 'new',
+          favourite: false,
+        };
+        indexByKey.set(key, base.length);
+        base.push(created);
+        addedCount++;
+      }
+    }
+
+    return {
+      ok: true,
+      mergedEntries: base,
+      addedCount,
+      updatedCount,
+      unchangedCount,
+      skippedCount,
+    };
+  }
+
+  function getHighlightableEntries(entries) {
+    return (Array.isArray(entries) ? entries : []).filter((entry) => {
+      if (!entry || !entry.expression) return false;
+      const level = getMasteryLevel(entry);
+      return level === 'new' || level === 'learning';
+    });
+  }
+
+  function escapeRegExp(str) {
+    return String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function buildHighlightMatcher(entries, maxTerms) {
+    const limit = typeof maxTerms === 'number' && maxTerms > 0 ? maxTerms : 300;
+    const active = getHighlightableEntries(entries);
+    const map = Object.create(null);
+    const terms = [];
+
+    for (const entry of active) {
+      const expr = normalizeExpression(entry.expression);
+      const key = normalizeKey(expr);
+      if (!expr || expr.length < 2 || !key || map[key]) continue;
+      map[key] = {
+        id: entry.id,
+        expression: entry.expression,
+        category: entry.category,
+        meaning: entry.meaning,
+        example: entry.example,
+        masteryLevel: getMasteryLevel(entry),
+      };
+      terms.push(expr);
+      if (terms.length >= limit) break;
+    }
+
+    if (terms.length === 0) {
+      return { regex: null, map, count: 0 };
+    }
+
+    terms.sort((a, b) => b.length - a.length);
+    const pattern = '\\b(' + terms.map((t) => escapeRegExp(t).replace(/\s+/g, '\\s+')).join('|') + ')\\b';
+    return {
+      regex: new RegExp(pattern, 'gi'),
+      map,
+      count: terms.length,
+    };
+  }
+
+  function sanitizePdfAscii(text) {
+    return String(text == null ? '' : text)
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2013\u2014]/g, '-')
+      .replace(/\u2026/g, '...')
+      .replace(/[\u2022\u00B7]/g, '|')
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/[^\x20-\x7E]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function escapePdfString(text) {
+    return sanitizePdfAscii(text)
+      .replace(/\\/g, '\\\\')
+      .replace(/\(/g, '\\(')
+      .replace(/\)/g, '\\)');
+  }
+
+  function wrapPdfText(text, maxChars) {
+    const clean = sanitizePdfAscii(text);
+    if (!clean) return [''];
+    const words = clean.split(' ');
+    const lines = [];
+    let current = '';
+
+    for (const word of words) {
+      if (word.length > maxChars) {
+        if (current) {
+          lines.push(current);
+          current = '';
+        }
+        for (let i = 0; i < word.length; i += maxChars) {
+          lines.push(word.slice(i, i + maxChars));
+        }
+        continue;
+      }
+      const next = current ? current + ' ' + word : word;
+      if (next.length <= maxChars) {
+        current = next;
+      } else {
+        if (current) lines.push(current);
+        current = word;
+      }
+    }
+    if (current) lines.push(current);
+    return lines.length > 0 ? lines : [''];
+  }
+
+  function buildPdfStudySheetPlan(entries, options) {
+    const opts = options || {};
+    const categoryFilter =
+      opts.category && VALID_CATEGORIES.includes(opts.category) ? opts.category : 'all';
+    const sortOrder = opts.sortOrder === 'za' || opts.sortOrder === 'recent' ? opts.sortOrder : 'az';
+    const now = opts.now instanceof Date ? opts.now : new Date();
+
+    const labels = {
+      all: 'All Categories (Words, Idioms & Phrasal Verbs)',
+      vocabulary: 'Vocabulary (Words)',
+      idioms: 'Idioms',
+      phrasalVerbs: 'Phrasal Verbs',
+    };
+    const slugs = {
+      all: 'all-categories',
+      vocabulary: 'words',
+      idioms: 'idioms',
+      phrasalVerbs: 'phrasal-verbs',
+    };
+
+    let filtered =
+      categoryFilter === 'all'
+        ? [...(entries || [])]
+        : (entries || []).filter((e) => e.category === categoryFilter);
+
+    if (sortOrder === 'az') {
+      filtered.sort((a, b) => a.expression.localeCompare(b.expression, undefined, { sensitivity: 'base' }));
+    } else if (sortOrder === 'za') {
+      filtered.sort((a, b) => b.expression.localeCompare(a.expression, undefined, { sensitivity: 'base' }));
+    } else {
+      filtered.sort((a, b) => Date.parse(b.dateAdded || '') - Date.parse(a.dateAdded || ''));
+    }
+
+    const dateStamp = now.toISOString().slice(0, 10);
+    const generatedDateLabel = formatDate(now.toISOString()) || dateStamp;
+    const categoryLabel = labels[categoryFilter];
+    const slug = slugs[categoryFilter];
+
+    const rows = filtered.map((entry, idx) => ({
+      index: idx + 1,
+      expression: String(entry.expression || '').trim(),
+      category: entry.category,
+      categoryLabel: CATEGORIES[entry.category] || 'Vocabulary',
+      meaning: String(entry.meaning || '').trim(),
+      example: String(entry.example || '').trim(),
+      masteryLabel: MASTERY_LABELS[getMasteryLevel(entry)] || 'New',
+    }));
+
+    return {
+      title: 'IPMAT/CUET VOCAB BUILDER',
+      subtitle: `Printable Study Sheet | ${categoryLabel} | ${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}`,
+      categoryFilter,
+      categoryLabel,
+      filename: `ipmat-cuet-study-sheet-${slug}-${dateStamp}.pdf`,
+      generatedDateLabel,
+      totalCount: rows.length,
+      rows,
+    };
+  }
+
+  function buildPdfStudySheetBytes(entries, options) {
+    const plan = buildPdfStudySheetPlan(entries, options);
+    if (plan.rows.length === 0) {
+      throw new Error(`No entries available in ${plan.categoryLabel} to export.`);
+    }
+
+    const pageW = 595;
+    const pageH = 842;
+    const marginX = 36;
+    const contentW = pageW - marginX * 2;
+    const showCatCol = plan.categoryFilter === 'all';
+
+    // Column geometry & max character widths (9pt Helvetica inside A4)
+    const cols = showCatCol
+      ? [
+          { label: '#', x: marginX, w: 26, maxChars: 4, font: 'F1' },
+          { label: 'Word / Expression', x: marginX + 26, w: 102, maxChars: 18, font: 'F2' },
+          { label: 'Category', x: marginX + 128, w: 66, maxChars: 11, font: 'F1' },
+          { label: 'Meaning', x: marginX + 194, w: 138, maxChars: 26, font: 'F1' },
+          { label: 'Example Sentence', x: marginX + 332, w: 141, maxChars: 27, font: 'F1' },
+          { label: 'Level', x: marginX + 473, w: 50, maxChars: 9, font: 'F1' },
+        ]
+      : [
+          { label: '#', x: marginX, w: 26, maxChars: 4, font: 'F1' },
+          { label: 'Word / Expression', x: marginX + 26, w: 116, maxChars: 21, font: 'F2' },
+          { label: 'Meaning', x: marginX + 142, w: 162, maxChars: 31, font: 'F1' },
+          { label: 'Example Sentence', x: marginX + 304, w: 167, maxChars: 32, font: 'F1' },
+          { label: 'Level', x: marginX + 471, w: 52, maxChars: 9, font: 'F1' },
+        ];
+
+    const pagesStreams = [];
+    let cmds = [];
+    let cursorY = 0;
+
+    function drawBanner(isFirstPage) {
+      if (isFirstPage) {
+        cmds.push('0 0.161 0.384 rg'); // #002962
+        cmds.push(`0 ${pageH - 78} ${pageW} 78 re f`);
+        cmds.push('1 1 1 rg');
+        cmds.push(`BT /F2 15 Tf ${marginX} ${pageH - 34} Td (${escapePdfString(plan.title)}) Tj ET`);
+        cmds.push('0.859 0.918 0.996 rg');
+        cmds.push(`BT /F1 9.5 Tf ${marginX} ${pageH - 54} Td (${escapePdfString(plan.subtitle)}) Tj ET`);
+        cmds.push(`BT /F1 8.5 Tf ${pageW - marginX - 110} ${pageH - 54} Td (${escapePdfString('Generated ' + plan.generatedDateLabel)}) Tj ET`);
+        cursorY = pageH - 96;
+      } else {
+        cmds.push('0 0.161 0.384 rg');
+        cmds.push(`0 ${pageH - 34} ${pageW} 34 re f`);
+        cmds.push('1 1 1 rg');
+        cmds.push(`BT /F2 10 Tf ${marginX} ${pageH - 22} Td (${escapePdfString(plan.title + ' - Study Sheet')}) Tj ET`);
+        cursorY = pageH - 48;
+      }
+    }
+
+    function drawTableHeader() {
+      const headerH = 22;
+      cmds.push('0.933 0.953 0.976 rg'); // #EEF3F9
+      cmds.push(`${marginX} ${cursorY - headerH} ${contentW} ${headerH} re f`);
+      cmds.push('0.773 0.831 0.910 RG 0.7 w');
+      cmds.push(`${marginX} ${cursorY - headerH} ${contentW} ${headerH} re S`);
+      cmds.push('0 0.161 0.384 rg');
+      for (const col of cols) {
+        cmds.push(`BT /F2 8.5 Tf ${col.x + 5} ${cursorY - 14.5} Td (${escapePdfString(col.label)}) Tj ET`);
+      }
+      cursorY -= headerH;
+    }
+
+    function startPage(isFirstPage) {
+      cmds = [];
+      drawBanner(isFirstPage);
+      drawTableHeader();
+    }
+
+    startPage(true);
+
+    const lineHeight = 11.5;
+    const minBottomY = 48;
+
+    plan.rows.forEach((row, rowIdx) => {
+      const cellTexts = showCatCol
+        ? [String(row.index), row.expression, row.categoryLabel, row.meaning, row.example, row.masteryLabel]
+        : [String(row.index), row.expression, row.meaning, row.example, row.masteryLabel];
+
+      const wrappedCols = cols.map((col, ci) => wrapPdfText(cellTexts[ci], col.maxChars));
+      const maxLines = Math.max(...wrappedCols.map((lines) => lines.length));
+      const rowH = Math.max(22, maxLines * lineHeight + 10);
+
+      if (cursorY - rowH < minBottomY) {
+        pagesStreams.push(cmds.join('\n'));
+        startPage(false);
+      }
+
+      if (rowIdx % 2 === 1) {
+        cmds.push('0.961 0.953 0.941 rg'); // #F5F3F0
+      } else {
+        cmds.push('1 1 1 rg');
+      }
+      cmds.push(`${marginX} ${cursorY - rowH} ${contentW} ${rowH} re f`);
+      cmds.push('0.886 0.878 0.851 RG 0.5 w');
+      cmds.push(`${marginX} ${cursorY - rowH} ${contentW} ${rowH} re S`);
+
+      cmds.push('0 0.161 0.384 rg');
+      cols.forEach((col, ci) => {
+        const lines = wrappedCols[ci];
+        lines.forEach((line, li) => {
+          const textY = cursorY - 13 - li * lineHeight;
+          cmds.push(`BT /${col.font} 8.5 Tf ${col.x + 5} ${textY.toFixed(1)} Td (${escapePdfString(line)}) Tj ET`);
+        });
+      });
+
+      cursorY -= rowH;
+    });
+
+    pagesStreams.push(cmds.join('\n'));
+
+    const totalPages = pagesStreams.length;
+    const finalizedStreams = pagesStreams.map((streamBody, idx) => {
+      const footer = [
+        '0.886 0.878 0.851 RG 0.6 w',
+        `${marginX} 32 m ${pageW - marginX} 32 l S`,
+        '0.231 0.333 0.471 rg',
+        `BT /F1 8 Tf ${marginX} 19 Td (${escapePdfString(plan.title + ' | ' + plan.categoryLabel)}) Tj ET`,
+        `BT /F1 8 Tf ${pageW - marginX - 52} 19 Td (${escapePdfString(`Page ${idx + 1} of ${totalPages}`)}) Tj ET`,
+      ].join('\n');
+      return streamBody + '\n' + footer;
+    });
+
+    // Assemble PDF objects:
+    // 1: Catalog, 2: Pages, 3: Helvetica (/F1), 4: Helvetica-Bold (/F2),
+    // 5..: alternating Page + Content Stream objects
+    const objects = [];
+    const pageObjIds = [];
+    let nextId = 5;
+
+    finalizedStreams.forEach(() => {
+      pageObjIds.push(nextId);
+      nextId += 2;
+    });
+
+    objects.push({
+      id: 1,
+      body: '<< /Type /Catalog /Pages 2 0 R >>',
+    });
+    objects.push({
+      id: 2,
+      body: `<< /Type /Pages /Kids [${pageObjIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageObjIds.length} >>`,
+    });
+    objects.push({
+      id: 3,
+      body: '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+    });
+    objects.push({
+      id: 4,
+      body: '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
+    });
+
+    const encoder = new TextEncoder();
+    finalizedStreams.forEach((streamStr, idx) => {
+      const pageId = pageObjIds[idx];
+      const streamId = pageId + 1;
+      const streamLen = encoder.encode(streamStr).byteLength;
+      objects.push({
+        id: pageId,
+        body: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${streamId} 0 R >>`,
+      });
+      objects.push({
+        id: streamId,
+        body: `<< /Length ${streamLen} >>\nstream\n${streamStr}\nendstream`,
+      });
+    });
+
+    const chunks = [];
+    let byteOffset = 0;
+    const offsets = new Map();
+
+    function pushChunk(str) {
+      const bytes = encoder.encode(str);
+      chunks.push(bytes);
+      byteOffset += bytes.byteLength;
+    }
+
+    pushChunk('%PDF-1.4\n');
+    for (const obj of objects) {
+      offsets.set(obj.id, byteOffset);
+      pushChunk(`${obj.id} 0 obj\n${obj.body}\nendobj\n`);
+    }
+
+    const xrefStart = byteOffset;
+    const maxObjId = objects[objects.length - 1].id;
+    pushChunk(`xref\n0 ${maxObjId + 1}\n0000000000 65535 f \n`);
+    for (let id = 1; id <= maxObjId; id++) {
+      const off = String(offsets.get(id) || 0).padStart(10, '0');
+      pushChunk(`${off} 00000 n \n`);
+    }
+    pushChunk(`trailer\n<< /Size ${maxObjId + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`);
+
+    const totalBytes = chunks.reduce((sum, arr) => sum + arr.byteLength, 0);
+    const out = new Uint8Array(totalBytes);
+    let pos = 0;
+    for (const arr of chunks) {
+      out.set(arr, pos);
+      pos += arr.byteLength;
+    }
+
+    return {
+      bytes: out,
+      filename: plan.filename,
+      entryCount: plan.rows.length,
+      categoryLabel: plan.categoryLabel,
+    };
+  }
+
   return {
     CATEGORIES,
     CATEGORY_SINGULAR,
     SHEET_TABS,
     VALID_CATEGORIES,
+    VALID_MASTERY_LEVELS,
+    MASTERY_LABELS,
+    MASTERY_BADGES,
+    QUIZ_MIN_QUESTIONS,
+    QUIZ_MAX_QUESTIONS,
+    DEFAULT_DAILY_GOAL,
+    MIN_DAILY_GOAL,
+    MAX_DAILY_GOAL,
+    GEMINI_MODEL,
     GEMINI_MODELS,
     DEFAULT_SETTINGS,
     normalizeExpression,
@@ -710,6 +1781,26 @@
     extractContextSentence,
     findDuplicate,
     getCategoryCounts,
+    getMasteryLevel,
+    getMasteryStats,
+    getMasteryBadgeProgress,
+    getCategoryInsightData,
+    getMasteryDistributionData,
+    getStudyMasteryForOutcome,
+    getReviewIntervalDays,
+    createInitialReviewSchedule,
+    previewReviewIntervals,
+    calculateReviewPatch,
+    getEntryReviewSchedule,
+    getDailyReviewQueue,
+    buildStudyDeck,
+    getQuizEligibleEntries,
+    generateQuizQuestions,
+    getLocalDateKey,
+    clampDailyGoal,
+    computeDailyGoalStats,
+    formatEntryCopyText,
+    getToolbarBadgeText,
     buildGeminiPrompt,
     parseGeminiResponse,
     sanitizeEntry,
@@ -717,6 +1808,13 @@
     validateAndMergeImport,
     escapeCsvCell,
     buildCsv,
+    buildAnkiTsv,
+    mergePulledSheetEntries,
+    getHighlightableEntries,
+    escapeRegExp,
+    buildHighlightMatcher,
+    buildPdfStudySheetPlan,
+    buildPdfStudySheetBytes,
     formatDate,
     generateId,
   };

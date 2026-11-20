@@ -1,13 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { GoogleSheetsBar, GoogleSheetsController } from './GoogleSheetsBar';
 import {
   CATEGORIES,
   Category,
+  MASTERY_LABELS,
   VocabEntry,
+  buildHighlightMatcher,
   detectCategory,
   extractContextSentence,
   getCategoryCounts,
+  getMasteryLevel,
   normalizeExpression,
+  normalizeKey,
   parseBulkInput,
 } from '../utils/vocabLogic';
 
@@ -38,6 +42,7 @@ interface LivePreviewViewProps {
   }) => Promise<AnalyseOutcome>;
   onOpenLibrary: () => void;
   onOpenInstallGuide: () => void;
+  onOpenHowItWorks?: () => void;
 }
 
 interface FloatingSelection {
@@ -75,6 +80,7 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
   onSaveAndAnalyse,
   onOpenLibrary,
   onOpenInstallGuide,
+  onOpenHowItWorks,
 }) => {
   const articleRef = useRef<HTMLDivElement | null>(null);
   const floatRef = useRef<HTMLDivElement | null>(null);
@@ -97,6 +103,20 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
   } | null>(null);
   const [showSettingsInfo, setShowSettingsInfo] = useState(false);
 
+  // In-Page Word Highlighter state (underlines saved New & Learning words in the reading sandbox)
+  const [highlighterEnabled, setHighlighterEnabled] = useState(true);
+  const [peekState, setPeekState] = useState<{
+    entry: VocabEntry;
+    top: number;
+    left: number;
+  } | null>(null);
+  const peekHideTimerRef = useRef<number | null>(null);
+
+  const highlightMatcher = useMemo(
+    () => (highlighterEnabled ? buildHighlightMatcher(entries) : { regex: null, map: new Map<string, VocabEntry>(), count: 0 }),
+    [entries, highlighterEnabled]
+  );
+
   const counts = getCategoryCounts(entries);
   const recentEntries = entries.slice(0, 4);
 
@@ -118,8 +138,9 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && panelMode !== 'hidden') {
-        hideFloating();
+      if (e.key === 'Escape') {
+        if (panelMode !== 'hidden') hideFloating();
+        if (peekState) setPeekState(null);
       }
     };
     document.addEventListener('mousedown', handleMouseDown);
@@ -128,7 +149,90 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
       document.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [panelMode]);
+  }, [panelMode, peekState]);
+
+  const cancelPeekHide = () => {
+    if (peekHideTimerRef.current !== null) {
+      window.clearTimeout(peekHideTimerRef.current);
+      peekHideTimerRef.current = null;
+    }
+  };
+
+  const schedulePeekHide = () => {
+    cancelPeekHide();
+    peekHideTimerRef.current = window.setTimeout(() => {
+      setPeekState(null);
+    }, 140);
+  };
+
+  const showPeekForElement = (el: HTMLElement, entry: VocabEntry) => {
+    if (!articleRef.current) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    cancelPeekHide();
+    const containerRect = articleRef.current.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    const relTop = Math.max(8, elRect.bottom - containerRect.top + 8);
+    const relLeft = Math.max(
+      12,
+      Math.min(elRect.left - containerRect.left, containerRect.width - 300)
+    );
+    setPeekState({ entry, top: relTop, left: relLeft });
+  };
+
+  const renderHighlightedParagraph = (paragraph: string) => {
+    if (!highlightMatcher.regex) return paragraph;
+    const re = new RegExp(highlightMatcher.regex.source, 'gi');
+    const nodes: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    let partIdx = 0;
+
+    while ((match = re.exec(paragraph)) !== null) {
+      const matchedText = match[0];
+      const matchEntry = highlightMatcher.map.get(normalizeKey(matchedText));
+      if (!matchEntry) continue;
+
+      if (match.index > lastIndex) {
+        nodes.push(paragraph.slice(lastIndex, match.index));
+      }
+
+      const level = getMasteryLevel(matchEntry);
+      nodes.push(
+        <span
+          key={`hl-${partIdx++}-${match.index}`}
+          role="button"
+          tabIndex={0}
+          data-vocab-highlight="true"
+          data-mastery={level}
+          onMouseEnter={(e) => showPeekForElement(e.currentTarget, matchEntry)}
+          onMouseLeave={schedulePeekHide}
+          onFocus={(e) => showPeekForElement(e.currentTarget, matchEntry)}
+          onBlur={schedulePeekHide}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              showPeekForElement(e.currentTarget, matchEntry);
+            }
+          }}
+          className={`inline rounded-sm px-0.5 border-b-2 border-dotted transition-colors cursor-help focus:outline-none focus:ring-2 focus:ring-[#002962]/30 dark:focus:ring-[#60A5FA]/40 ${
+            level === 'learning'
+              ? 'border-[#0F766E] dark:border-[#2DD4BF] bg-[#F0FDFA] dark:bg-[#0F766E]/25 hover:bg-[#CCFBF1] dark:hover:bg-[#0F766E]/40'
+              : 'border-[#EA580C] dark:border-[#FB923C] bg-[#FFF7ED] dark:bg-[#EA580C]/20 hover:bg-[#FFEDD5] dark:hover:bg-[#EA580C]/35'
+          }`}
+          title={`${matchEntry.expression} (${MASTERY_LABELS[level]}) — hover or focus to peek meaning`}
+        >
+          {matchedText}
+        </span>
+      );
+      lastIndex = match.index + matchedText.length;
+    }
+
+    if (lastIndex < paragraph.length) {
+      nodes.push(paragraph.slice(lastIndex));
+    }
+    return nodes.length > 0 ? nodes : paragraph;
+  };
 
   const captureFromRange = (range: Range, rawText: string) => {
     if (!articleRef.current) return;
@@ -300,71 +404,166 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Intro Header Row */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-5 border-b border-slate-200">
-        <div className="max-w-2xl">
-          <h1 className="text-[26px] md:text-[31px] font-semibold tracking-tight text-slate-900 leading-tight [text-wrap:balance]">
-            CUET UG 2027 Vocabulary Collector for Brave
-          </h1>
-          <p className="mt-2 text-[15px] text-slate-600 leading-relaxed">
-            Highlight any English word, idiom, or phrasal verb in the article below to test the floating capture flow, or try bulk entry in the Brave popup preview on the right. Download the complete Manifest V3 ZIP at any time to load directly into Brave.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-500 shrink-0">
-          <span>Manifest V3</span>
-          <span aria-hidden="true">·</span>
-          <span>Vanilla HTML/CSS/JS</span>
-          <span aria-hidden="true">·</span>
-          <span>Google Sheets Auto-Save</span>
-        </div>
-      </div>
-
-      {/* Google Sheets Auto-Save Connection Bar */}
-      <GoogleSheetsBar sheets={sheets} />
-
-      {/* Main 2-Zone Interactive Stage */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_384px] gap-7 items-start">
-        {/* Left Zone: Live Webpage Selection Sandbox */}
-        <section
-          ref={articleRef}
-          onMouseUp={handleArticleMouseUp}
-          className="relative bg-white border border-slate-200 rounded-lg p-5 sm:p-7"
-          aria-labelledby="sample-article-title"
-        >
-          <p className="text-xs font-medium text-slate-500 mb-1.5">
-            {SAMPLE_ARTICLE.publication}
-          </p>
-          <h2 id="sample-article-title" className="text-xl sm:text-2xl font-semibold text-slate-900 tracking-tight leading-snug">
-            {SAMPLE_ARTICLE.title}
-          </h2>
-          <p className="mt-1.5 text-[13px] text-slate-500 pb-4 mb-5 border-b border-slate-200">
-            {SAMPLE_ARTICLE.byline}
-          </p>
-
-          <div className="article-prose space-y-4 text-[15.5px] leading-[1.72] text-slate-800 max-w-[68ch]">
-            {SAMPLE_ARTICLE.paragraphs.map((para, idx) => (
-              <p key={idx} data-sample-para="true">
-                {para}
-              </p>
-            ))}
+      {/* Nesoi Architectural Hero Display + Midnight Navy Showcase Panel */}
+      <section aria-labelledby="hero-display-title" className="space-y-4">
+        <div className="space-y-2.5">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-white dark:bg-[#111C30] border border-[#002962]/15 dark:border-[#93C5FD]/20 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#3B5578] dark:text-[#9FB3CE]">
+            <span className="text-[#002962] dark:text-[#93C5FD] font-bold">IPMAT &amp; CUET</span>
+            <span className="text-[#002962]/25 dark:text-[#93C5FD]/30">|</span>
+            <span>Chrome · Brave · Edge · Vivaldi · Opera · Arc · Chromium</span>
           </div>
 
-          {/* Quick Selection Helpers */}
-          <div className="mt-6 pt-4 border-t border-slate-200 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]">
-            <span className="font-medium text-slate-500">Quick-select an expression to test:</span>
-            {QUICK_TEST_PHRASES.map((phrase) => (
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-3">
+            <h1
+              id="hero-display-title"
+              className="font-editorial text-[34px] sm:text-[46px] md:text-[52px] font-light tracking-[-0.03em] text-[#002962] dark:text-[#F1F5F9] leading-[1.06] [text-wrap:balance] max-w-[19ch] sm:max-w-none"
+            >
+              IPMAT/CUET VOCAB BUILDER
+              <span className="text-[#EA580C] font-semibold" aria-hidden="true">.</span>
+            </h1>
+          </div>
+        </div>
+
+        <div className="nesoi-navy-panel rounded-xl text-white overflow-hidden shadow-md border border-[#002962] dark:border-[#93C5FD]/20">
+          {/* Top Hairline Quick-Navigation Strip */}
+          <div className="grid grid-cols-3 sm:grid-cols-6 border-b border-white/15 px-4 sm:px-7">
+            {[
+              { label: 'Reading Sandbox', onClick: () => articleRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
+              { label: 'Words & Idioms', onClick: onOpenLibrary },
+              { label: 'Insights & Charts', onClick: onOpenLibrary },
+              { label: 'Study & Quiz', onClick: onOpenLibrary },
+              { label: 'How It Works', onClick: onOpenHowItWorks || onOpenInstallGuide },
+              { label: 'Install Guide', onClick: onOpenInstallGuide },
+            ].map((item) => (
               <button
-                key={phrase}
+                key={item.label}
                 type="button"
-                onClick={() => handleQuickSelectPhrase(phrase)}
-                className="text-teal-800 hover:text-teal-950 underline underline-offset-4 decoration-slate-300 hover:decoration-teal-700 font-medium cursor-pointer transition-colors whitespace-nowrap"
+                onClick={item.onClick}
+                className="py-3 text-center text-[12.5px] font-medium text-[#DCE8FA]/85 hover:text-white transition-colors border-b-2 border-transparent hover:border-[#EA580C] cursor-pointer truncate"
               >
-                {phrase}
+                {item.label}
               </button>
             ))}
           </div>
 
-          {/* Floating "Save to CUET List" Button & Confirmation Panel */}
+          {/* Navy Showcase Body */}
+          <div className="p-6 sm:p-8 flex flex-col md:flex-row md:items-end justify-between gap-6">
+            <div className="max-w-xl space-y-2.5">
+              <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#FDBA74]">
+                ENGLISH COLLECTOR · MANIFEST V3
+              </p>
+              <h2 className="font-editorial text-2xl sm:text-[31px] font-light tracking-[-0.025em] text-white leading-[1.14]">
+                Effortless vocabulary prep that actually sticks
+                <span className="text-[#EA580C] font-semibold" aria-hidden="true">.</span>
+              </h2>
+              <p className="text-[14.5px] text-[#DCE8FA]/90 leading-relaxed">
+                Highlight any word, idiom, or phrasal verb (or press Alt+Shift+V / right-click in the extension) to fetch its plain meaning, auto-save to Google Sheets with two-way Pull, hover highlighted words on articles, and export PDFs or Anki decks.
+              </p>
+            </div>
+
+            {/* Bottom-right Architectural CTA Box */}
+            <button
+              type="button"
+              onClick={onOpenLibrary}
+              className="group text-left bg-white/10 hover:bg-white/15 backdrop-blur-sm border border-white/25 rounded-lg px-5 py-3.5 transition-colors shrink-0 cursor-pointer min-w-[236px]"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-white">Ready to revise?</span>
+                <span className="text-[#FDBA74] group-hover:translate-x-0.5 transition-transform text-sm" aria-hidden="true">
+                  →
+                </span>
+              </div>
+              <p className="text-xs text-[#DCE8FA]/85 mt-0.5">
+                Open THE VOCAB VAULT ({entries.length} saved)
+              </p>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Google Sheets Auto-Save Connection Bar */}
+      <GoogleSheetsBar sheets={sheets} onOpenInstallGuide={onOpenInstallGuide} />
+
+      {/* Main 2-Zone Interactive Stage */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_384px] gap-6 items-start">
+        {/* Left Zone: Browser-Window Showcase Frame around Reading Sandbox */}
+        <section
+          ref={articleRef}
+          onMouseUp={handleArticleMouseUp}
+          className="relative nesoi-card overflow-visible scroll-mt-20"
+          aria-labelledby="sample-article-title"
+        >
+          {/* Browser Window Top Chrome */}
+          <div className="flex flex-wrap items-center justify-between gap-2.5 px-4 py-2.5 bg-[#F5F3F0] dark:bg-[#0D1626] border-b border-[#002962]/12 dark:border-[#93C5FD]/15 rounded-t-xl">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 shrink-0" aria-hidden="true">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#FF5F56]" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#FFBD2E]" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[#27C93F]" />
+              </div>
+              <div className="flex-1 bg-white dark:bg-[#111C30] border border-[#002962]/12 dark:border-[#93C5FD]/18 rounded-md px-3 py-1 text-[11.5px] text-[#3B5578] dark:text-[#9FB3CE] font-medium truncate">
+                ipmat-cuet-vocab.app · highlight-to-save-reading-passage
+              </div>
+            </div>
+            <label className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold text-[#002962] dark:text-[#E8EEF7] bg-white dark:bg-[#111C30] border border-[#002962]/15 dark:border-[#93C5FD]/22 rounded-md px-2.5 py-1 cursor-pointer select-none shrink-0">
+              <input
+                type="checkbox"
+                checked={highlighterEnabled}
+                onChange={(e) => {
+                  setHighlighterEnabled(e.target.checked);
+                  if (!e.target.checked) setPeekState(null);
+                }}
+                className="h-3.5 w-3.5 accent-[#002962] dark:accent-[#3B82F6] cursor-pointer"
+              />
+              <span>In-Page Highlighter</span>
+              <span className="text-[10.5px] font-medium text-[#3B5578] dark:text-[#9FB3CE] tabular-nums">
+                ({highlightMatcher.count})
+              </span>
+            </label>
+          </div>
+
+          <div className="p-5 sm:p-7">
+            <p className="text-xs font-semibold text-[#3B5578] dark:text-[#9FB3CE] mb-1.5">
+              {SAMPLE_ARTICLE.publication}
+            </p>
+            <h2 id="sample-article-title" className="font-editorial text-xl sm:text-2xl font-semibold text-[#002962] dark:text-[#F1F5F9] tracking-[-0.02em] leading-snug">
+              {SAMPLE_ARTICLE.title}
+            </h2>
+            <p className="mt-1.5 text-[13px] text-[#3B5578] dark:text-[#9FB3CE] pb-4 mb-5 border-b border-[#002962]/12 dark:border-[#93C5FD]/15">
+              {SAMPLE_ARTICLE.byline}{' '}
+              {highlighterEnabled && highlightMatcher.count > 0 && (
+                <span className="text-[#002962] dark:text-[#DCE8FA] font-medium">
+                  · Hover dotted highlights (<span className="border-b-2 border-dotted border-[#EA580C] dark:border-[#FB923C]">New</span> /{' '}
+                  <span className="border-b-2 border-dotted border-[#0F766E] dark:border-[#2DD4BF]">Learning</span>) to peek meanings.
+                </span>
+              )}
+            </p>
+
+            <div className="article-prose space-y-4 text-[15.5px] leading-[1.74] text-[#1A3459] dark:text-[#CBD5E1] max-w-[68ch]">
+              {SAMPLE_ARTICLE.paragraphs.map((para, idx) => (
+                <p key={idx} data-sample-para="true">
+                  {renderHighlightedParagraph(para)}
+                </p>
+              ))}
+            </div>
+
+            {/* Quick Selection Helpers */}
+            <div className="mt-6 pt-4 border-t border-[#002962]/12 dark:border-[#93C5FD]/15 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
+              <span className="font-semibold text-[#3B5578] dark:text-[#9FB3CE]">Quick-select to test:</span>
+              {QUICK_TEST_PHRASES.map((phrase) => (
+                <button
+                  key={phrase}
+                  type="button"
+                  onClick={() => handleQuickSelectPhrase(phrase)}
+                  className="text-[#002962] dark:text-[#93C5FD] hover:text-[#EA580C] dark:hover:text-[#FB923C] underline underline-offset-4 decoration-[#002962]/30 dark:decoration-[#93C5FD]/35 hover:decoration-[#EA580C] font-semibold cursor-pointer transition-colors whitespace-nowrap"
+                >
+                  {phrase}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Floating "Save to Vocab List" Button & Confirmation Panel */}
           {panelMode !== 'hidden' && selection && (
             <div
               ref={floatRef}
@@ -376,20 +575,20 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setPanelMode('confirm')}
-                  className="px-3.5 py-2 bg-slate-900 text-white text-[13px] font-semibold rounded-md shadow-md hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 whitespace-nowrap cursor-pointer"
+                  className="px-4 py-2 bg-[#002962] dark:bg-[#2563EB] text-white text-[13px] font-semibold rounded-md shadow-lg hover:bg-[#001F4D] dark:hover:bg-[#1D4ED8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#002962] whitespace-nowrap cursor-pointer"
                 >
-                  Save to CUET List
+                  Save to Vocab List
                 </button>
               ) : (
                 <div
                   role="dialog"
-                  aria-label="Save to CUET List confirmation"
-                  className="w-[310px] max-w-[calc(100vw-48px)] bg-white border border-slate-300 rounded-lg shadow-lg p-4 text-slate-900"
+                  aria-label="Save to Vocab List confirmation"
+                  className="w-[310px] max-w-[calc(100vw-48px)] bg-white dark:bg-[#111C30] border border-[#002962]/20 dark:border-[#93C5FD]/25 rounded-xl shadow-xl p-4 text-[#002962] dark:text-[#E8EEF7]"
                 >
                   <div className="flex items-start justify-between gap-2 mb-3">
                     <div>
-                      <p className="text-[11px] font-semibold text-slate-500">CUET Vocabulary Builder</p>
-                      <p className="text-[16px] font-bold text-slate-900 leading-snug break-words">
+                      <p className="text-[11px] font-semibold text-[#3B5578] dark:text-[#9FB3CE]">IPMAT/CUET VOCAB BUILDER</p>
+                      <p className="text-[16px] font-bold text-[#002962] dark:text-[#F1F5F9] leading-snug break-words">
                         {selection.expression}
                       </p>
                     </div>
@@ -397,7 +596,7 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                       type="button"
                       onClick={hideFloating}
                       aria-label="Close confirmation panel"
-                      className="text-slate-400 hover:text-slate-800 text-lg leading-none px-1 cursor-pointer"
+                      className="text-[#3B5578] dark:text-[#9FB3CE] hover:text-[#002962] dark:hover:text-white text-lg leading-none px-1 cursor-pointer"
                     >
                       ×
                     </button>
@@ -405,7 +604,7 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
 
                   {(panelMode === 'confirm' || panelMode === 'saving') && (
                     <>
-                      <p className="text-xs font-medium text-slate-600 mb-2">
+                      <p className="text-xs font-medium text-[#3B5578] dark:text-[#9FB3CE] mb-2">
                         Category (auto-detected — click to change)
                       </p>
                       <div className="grid grid-cols-3 gap-1.5 mb-3.5">
@@ -422,10 +621,10 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                             disabled={panelMode === 'saving'}
                             aria-pressed={selection.category === opt.key}
                             onClick={() => setSelection({ ...selection, category: opt.key })}
-                            className={`px-2 py-1.5 text-xs font-medium rounded border transition-colors whitespace-nowrap cursor-pointer ${
+                            className={`px-2 py-1.5 text-xs font-semibold rounded-md border transition-colors whitespace-nowrap cursor-pointer ${
                               selection.category === opt.key
-                                ? 'bg-teal-700 border-teal-700 text-white'
-                                : 'bg-white border-slate-300 text-slate-700 hover:border-slate-400'
+                                ? 'bg-[#002962] dark:bg-[#2563EB] border-[#002962] dark:border-[#2563EB] text-white'
+                                : 'bg-white dark:bg-[#0D1626] border-[#002962]/20 dark:border-[#93C5FD]/22 text-[#002962] dark:text-[#E8EEF7] hover:border-[#002962] dark:hover:border-[#60A5FA]'
                             }`}
                           >
                             {opt.label}
@@ -437,7 +636,7 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                           type="button"
                           onClick={hideFloating}
                           disabled={panelMode === 'saving'}
-                          className="px-3 py-1.5 text-xs font-medium border border-slate-300 rounded text-slate-700 hover:bg-slate-50 cursor-pointer"
+                          className="px-3.5 py-1.5 text-xs font-semibold border border-[#002962]/20 dark:border-[#93C5FD]/22 rounded-md text-[#002962] dark:text-[#E8EEF7] hover:bg-[#F5F3F0] dark:hover:bg-[#172540] cursor-pointer"
                         >
                           Cancel
                         </button>
@@ -445,7 +644,7 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                           type="button"
                           onClick={handleFloatingSave}
                           disabled={panelMode === 'saving'}
-                          className="px-3.5 py-1.5 text-xs font-semibold bg-slate-900 text-white rounded hover:bg-slate-800 disabled:opacity-60 cursor-pointer"
+                          className="px-4 py-1.5 text-xs font-semibold bg-[#002962] dark:bg-[#2563EB] text-white rounded-md hover:bg-[#001F4D] dark:hover:bg-[#1D4ED8] disabled:opacity-60 cursor-pointer"
                         >
                           {panelMode === 'saving' ? 'Analysing…' : 'Save'}
                         </button>
@@ -455,22 +654,22 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
 
                   {panelMode === 'result' && savedResult && (
                     <div>
-                      <p className="text-xs font-semibold text-teal-700 mb-2">
+                      <p className="text-xs font-semibold text-[#002962] dark:text-[#93C5FD] mb-2">
                         Saved to {CATEGORIES[savedResult.category]}
                         {savedSheetSync?.synced && savedSheetSync.tabName
                           ? ` · Added to Google Sheet (${savedSheetSync.tabName})`
                           : ''}
                       </p>
                       {savedSheetSync?.attempted && !savedSheetSync.synced && savedSheetSync.error && (
-                        <p className="text-[11.5px] text-amber-700 mb-2">
+                        <p className="text-[11.5px] text-amber-800 dark:text-amber-300 mb-2">
                           {savedSheetSync.error}
                         </p>
                       )}
-                      <p className="text-[13px] text-slate-700 mb-1.5">
-                        <strong className="text-slate-900">Meaning:</strong> {savedResult.meaning}
+                      <p className="text-[13px] text-[#3B5578] dark:text-[#CBD5E1] mb-1.5">
+                        <strong className="text-[#002962] dark:text-white">Meaning:</strong> {savedResult.meaning}
                       </p>
-                      <p className="text-[13px] text-slate-700 mb-3.5">
-                        <strong className="text-slate-900">Example:</strong> {savedResult.example}
+                      <p className="text-[13px] text-[#3B5578] dark:text-[#CBD5E1] mb-3.5">
+                        <strong className="text-[#002962] dark:text-white">Example:</strong> {savedResult.example}
                       </p>
                       <div className="flex items-center justify-end gap-2">
                         <button
@@ -479,14 +678,14 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                             hideFloating();
                             onOpenLibrary();
                           }}
-                          className="px-3 py-1.5 text-xs font-medium border border-slate-300 rounded text-slate-800 hover:bg-slate-50 cursor-pointer"
+                          className="px-3.5 py-1.5 text-xs font-semibold bg-[#EEF3F9] dark:bg-[#172540] border border-[#002962]/20 dark:border-[#93C5FD]/25 rounded-md text-[#002962] dark:text-[#E8EEF7] hover:bg-[#E1EAF5] dark:hover:bg-[#1E3154] cursor-pointer"
                         >
                           Open Library
                         </button>
                         <button
                           type="button"
                           onClick={hideFloating}
-                          className="px-3.5 py-1.5 text-xs font-semibold bg-slate-900 text-white rounded hover:bg-slate-800 cursor-pointer"
+                          className="px-4 py-1.5 text-xs font-semibold bg-[#002962] dark:bg-[#2563EB] text-white rounded-md hover:bg-[#001F4D] dark:hover:bg-[#1D4ED8] cursor-pointer"
                         >
                           Done
                         </button>
@@ -496,12 +695,12 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
 
                   {panelMode === 'error' && (
                     <div>
-                      <p className="text-[13px] text-red-700 mb-3">{floatError}</p>
+                      <p className="text-[13px] text-red-700 dark:text-red-300 mb-3">{floatError}</p>
                       <div className="flex justify-end">
                         <button
                           type="button"
                           onClick={hideFloating}
-                          className="px-3 py-1.5 text-xs font-medium border border-slate-300 rounded text-slate-700 hover:bg-slate-50 cursor-pointer"
+                          className="px-3.5 py-1.5 text-xs font-semibold border border-[#002962]/20 dark:border-[#93C5FD]/22 rounded-md text-[#002962] dark:text-[#E8EEF7] hover:bg-[#F5F3F0] dark:hover:bg-[#172540] cursor-pointer"
                         >
                           Close
                         </button>
@@ -512,37 +711,70 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
               )}
             </div>
           )}
+
+          {/* Hover-to-Peek Meaning Tooltip for In-Page Word Highlighter */}
+          {peekState && panelMode === 'hidden' && (
+            <div
+              role="tooltip"
+              data-testid="in-page-peek-tooltip"
+              onMouseEnter={cancelPeekHide}
+              onMouseLeave={schedulePeekHide}
+              style={{ top: peekState.top, left: peekState.left }}
+              className="absolute z-30 w-[290px] max-w-[calc(100vw-40px)] bg-white dark:bg-[#111C30] border border-[#002962]/20 dark:border-[#93C5FD]/25 rounded-xl shadow-xl p-3.5 text-[#002962] dark:text-[#E8EEF7]"
+            >
+              <div className="flex items-start justify-between gap-2 mb-1.5">
+                <strong className="text-[14.5px] font-bold text-[#002962] dark:text-[#F1F5F9] leading-snug">
+                  {peekState.entry.expression}
+                </strong>
+                <span
+                  className={`text-[10.5px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 ${
+                    getMasteryLevel(peekState.entry) === 'learning'
+                      ? 'bg-[#CCFBF1] dark:bg-[#0F766E]/35 text-[#0F766E] dark:text-[#5EEAD4]'
+                      : 'bg-[#FFEDD5] dark:bg-[#EA580C]/25 text-[#C2410C] dark:text-[#FDBA74]'
+                  }`}
+                >
+                  {MASTERY_LABELS[getMasteryLevel(peekState.entry)]}
+                </span>
+              </div>
+              <p className="text-[12.5px] text-[#1A3459] dark:text-[#CBD5E1] leading-snug mb-1.5">
+                {peekState.entry.meaning}
+              </p>
+              <p className="text-[11.5px] text-[#3B5578] dark:text-[#9FB3CE] italic leading-snug">
+                &ldquo;{peekState.entry.example}&rdquo;
+              </p>
+            </div>
+          )}
         </section>
 
-        {/* Right Zone: Authentic Brave Extension Popup Simulator */}
-        <aside aria-label="Brave Extension Popup Preview" className="w-full max-w-[384px] mx-auto lg:mx-0">
-          <div className="bg-white border border-slate-300 rounded-lg shadow-sm overflow-hidden">
-            {/* Popup Header */}
-            <div className="flex items-center justify-between px-4 py-3.5 border-b border-slate-200">
-              <span className="text-[15px] font-bold tracking-tight text-slate-900">
-                CUET Vocabulary Builder
+        {/* Right Zone: Authentic Browser Extension Popup Simulator */}
+        <aside aria-label="Browser Extension Popup Preview" className="w-full max-w-[384px] mx-auto lg:mx-0">
+          <div className="nesoi-card overflow-hidden">
+            {/* Popup Header (Midnight Navy Strip) */}
+            <div className="flex items-center justify-between px-4 py-3.5 bg-[#002962] dark:bg-[#0B162C] text-white border-b border-transparent dark:border-[#93C5FD]/15">
+              <span className="text-[13.5px] font-bold tracking-tight truncate pr-2">
+                IPMAT/CUET VOCAB BUILDER
               </span>
               <button
                 type="button"
                 onClick={() => setShowSettingsInfo((v) => !v)}
-                className="text-xs font-medium text-slate-500 hover:text-slate-900 px-1.5 py-1 rounded cursor-pointer"
+                className="text-xs font-semibold text-[#DCE8FA] hover:text-white px-2.5 py-1 rounded-md hover:bg-white/10 transition-colors cursor-pointer shrink-0"
               >
                 Settings
               </button>
             </div>
 
             {showSettingsInfo && (
-              <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 text-xs text-slate-700 space-y-1.5">
-                <p className="font-semibold text-slate-900">Extension Settings (Brave Local Storage)</p>
+              <div className="px-4 py-3 bg-[#F5F3F0] dark:bg-[#0D1626] border-b border-[#002962]/12 dark:border-[#93C5FD]/15 text-xs text-[#3B5578] dark:text-[#9FB3CE] space-y-1.5">
+                <p className="font-semibold text-[#002962] dark:text-[#F1F5F9]">Extension Settings (Browser Local Storage)</p>
                 <p>
-                  In the downloaded Brave extension, Settings opens <code>settings.html</code> where you save your personal Gemini API key, select the model, and test the connection. Here in the live web preview, Gemini runs automatically so you can test right away.
+                  In the downloaded extension (works on Chrome, Brave, Edge, Vivaldi, Opera, Arc &amp; Chromium), Settings opens <code>settings.html</code> where you save your Gemini API key (<strong>Gemini 3.1 Flash Lite</strong>), Apps Script URL, daily goal, and <strong>In-Page Word Highlighter</strong> toggle. Also supports right-click <strong>&ldquo;Save to IPMAT/CUET VOCAB BUILDER&rdquo;</strong> &amp; <code>Alt+Shift+V</code>.
                 </p>
                 <button
                   type="button"
                   onClick={onOpenInstallGuide}
-                  className="text-teal-700 font-semibold underline cursor-pointer"
+                  className="text-[#002962] dark:text-[#93C5FD] font-semibold underline cursor-pointer"
                 >
-                  View Brave setup guide
+                  View Windows &amp; Mac install guide
                 </button>
               </div>
             )}
@@ -550,7 +782,7 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
             <div className="p-4 space-y-4">
               {/* Manual / Bulk Entry Form */}
               <form onSubmit={handlePopupSubmit} className="space-y-2.5" noValidate>
-                <label htmlFor="popup-manual-input" className="block text-xs font-semibold text-slate-700">
+                <label htmlFor="popup-manual-input" className="block text-xs font-semibold text-[#002962] dark:text-[#DCE8FA]">
                   Add word, idiom, or phrasal verb
                 </label>
                 <textarea
@@ -559,7 +791,7 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                   value={manualInput}
                   onChange={(e) => setManualInput(e.target.value)}
                   placeholder={'Single entry or multiple separated by commas or new lines\ne.g. aberration, break the ice, put off'}
-                  className="w-full px-3 py-2 text-[13px] border border-slate-300 rounded-md bg-white text-slate-900 focus:outline-none focus:border-teal-700 focus:ring-2 focus:ring-teal-700/15 resize-y"
+                  className="w-full px-3 py-2 text-[13px] border border-[#002962]/20 dark:border-[#93C5FD]/22 rounded-md bg-white dark:bg-[#0D1626] text-[#002962] dark:text-[#E8EEF7] placeholder:text-[#5E7494] dark:placeholder:text-[#7C95B6] focus:outline-none focus:border-[#002962] dark:focus:border-[#60A5FA] focus:ring-2 focus:ring-[#002962]/10 dark:focus:ring-[#60A5FA]/20 resize-y"
                 />
 
                 <div className="flex items-center gap-2">
@@ -570,7 +802,7 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                     id="popup-category-select"
                     value={manualCategory}
                     onChange={(e) => setManualCategory(e.target.value as 'auto' | Category)}
-                    className="flex-1 h-9 px-2.5 text-[12.5px] font-medium border border-slate-300 rounded-md bg-white text-slate-900 focus:outline-none focus:border-teal-700"
+                    className="flex-1 h-9 px-3 text-[12.5px] font-medium border border-[#002962]/20 dark:border-[#93C5FD]/22 rounded-md bg-white dark:bg-[#0D1626] text-[#002962] dark:text-[#E8EEF7] focus:outline-none focus:border-[#002962] dark:focus:border-[#60A5FA]"
                   >
                     <option value="auto">Auto-detect</option>
                     <option value="vocabulary">Vocabulary</option>
@@ -580,7 +812,7 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                   <button
                     type="submit"
                     disabled={isPopupBusy}
-                    className="h-9 px-3.5 text-[12.5px] font-semibold bg-slate-900 text-white rounded-md hover:bg-slate-800 disabled:opacity-60 whitespace-nowrap cursor-pointer"
+                    className="h-9 px-4 text-[12.5px] font-semibold bg-[#002962] dark:bg-[#2563EB] text-white rounded-md hover:bg-[#001F4D] dark:hover:bg-[#1D4ED8] disabled:opacity-60 whitespace-nowrap cursor-pointer transition-colors"
                   >
                     {isPopupBusy ? 'Analysing…' : 'Save and Analyse'}
                   </button>
@@ -590,19 +822,26 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
               {popupStatus && (
                 <div
                   aria-live="polite"
-                  className={`p-2.5 rounded-md border text-xs ${
+                  className={`p-3 rounded-lg border text-xs ${
                     popupStatus.tone === 'error'
-                      ? 'bg-red-50 border-red-200 text-red-900'
+                      ? 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800/60 text-red-900 dark:text-red-200'
                       : popupStatus.tone === 'success'
-                      ? 'bg-teal-50/70 border-teal-200 text-teal-950'
-                      : 'bg-slate-50 border-slate-200 text-slate-800'
+                      ? 'bg-[#EEF3F9] dark:bg-[#172540] border-[#002962]/20 dark:border-[#93C5FD]/25 text-[#002962] dark:text-[#E8EEF7]'
+                      : 'bg-[#F5F3F0] dark:bg-[#0D1626] border-[#002962]/15 dark:border-[#93C5FD]/20 text-[#002962] dark:text-[#E8EEF7]'
                   }`}
                 >
                   <p className="font-semibold">{popupStatus.summary}</p>
                   {popupStatus.details.length > 0 && (
                     <ul className="mt-1.5 pl-4 list-disc space-y-0.5 max-h-24 overflow-y-auto">
                       {popupStatus.details.map((d, idx) => (
-                        <li key={idx} className={d.isError ? 'text-red-700' : 'text-slate-700'}>
+                        <li
+                          key={idx}
+                          className={
+                            d.isError
+                              ? 'text-red-700 dark:text-red-300'
+                              : 'text-[#3B5578] dark:text-[#9FB3CE]'
+                          }
+                        >
                           {d.text}
                         </li>
                       ))}
@@ -611,48 +850,48 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                 </div>
               )}
 
-              {/* Unboxed Tabular Counts Strip */}
-              <div className="flex items-center justify-between py-2.5 border-y border-slate-200">
+              {/* Tabular Counts Strip */}
+              <div className="flex items-center justify-between py-2.5 px-2 rounded-lg bg-[#F5F3F0] dark:bg-[#0D1626] border border-[#002962]/12 dark:border-[#93C5FD]/15">
                 <div className="flex-1 text-center">
-                  <div className="text-lg font-bold text-slate-900 tabular-nums leading-tight" data-testid="popup-count-vocabulary">
+                  <div className="text-lg font-bold text-[#002962] dark:text-[#F1F5F9] tabular-nums leading-tight" data-testid="popup-count-vocabulary">
                     {counts.vocabulary}
                   </div>
-                  <div className="text-[11.5px] text-slate-500">Vocabulary</div>
+                  <div className="text-[11.5px] font-medium text-[#3B5578] dark:text-[#9FB3CE]">Vocabulary</div>
                 </div>
-                <div className="w-px h-7 bg-slate-200" aria-hidden="true" />
+                <div className="w-px h-7 bg-[#002962]/12 dark:bg-[#93C5FD]/18" aria-hidden="true" />
                 <div className="flex-1 text-center">
-                  <div className="text-lg font-bold text-slate-900 tabular-nums leading-tight" data-testid="popup-count-idioms">
+                  <div className="text-lg font-bold text-[#002962] dark:text-[#F1F5F9] tabular-nums leading-tight" data-testid="popup-count-idioms">
                     {counts.idioms}
                   </div>
-                  <div className="text-[11.5px] text-slate-500">Idioms</div>
+                  <div className="text-[11.5px] font-medium text-[#3B5578] dark:text-[#9FB3CE]">Idioms</div>
                 </div>
-                <div className="w-px h-7 bg-slate-200" aria-hidden="true" />
+                <div className="w-px h-7 bg-[#002962]/12 dark:bg-[#93C5FD]/18" aria-hidden="true" />
                 <div className="flex-1 text-center">
-                  <div className="text-lg font-bold text-slate-900 tabular-nums leading-tight" data-testid="popup-count-phrasal">
+                  <div className="text-lg font-bold text-[#002962] dark:text-[#F1F5F9] tabular-nums leading-tight" data-testid="popup-count-phrasal">
                     {counts.phrasalVerbs}
                   </div>
-                  <div className="text-[11.5px] text-slate-500">Phrasal Verbs</div>
+                  <div className="text-[11.5px] font-medium text-[#3B5578] dark:text-[#9FB3CE]">Phrasal Verbs</div>
                 </div>
               </div>
 
               {/* Recently Saved */}
               <div>
-                <h3 className="text-xs font-semibold text-slate-500 mb-1.5">Recently Saved</h3>
+                <h3 className="text-xs font-semibold text-[#3B5578] dark:text-[#9FB3CE] mb-1.5">Recently Saved</h3>
                 {recentEntries.length === 0 ? (
-                  <p className="text-xs text-slate-500 py-1">No entries saved yet.</p>
+                  <p className="text-xs text-[#3B5578] dark:text-[#9FB3CE] py-1">No entries saved yet.</p>
                 ) : (
-                  <div className="divide-y divide-slate-200 max-h-44 overflow-y-auto">
+                  <div className="divide-y divide-[#002962]/10 dark:divide-[#93C5FD]/12 max-h-44 overflow-y-auto">
                     {recentEntries.map((item) => (
                       <div key={item.id} className="py-2">
                         <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-[13px] font-semibold text-slate-900">
+                          <span className="text-[13px] font-bold text-[#002962] dark:text-[#F1F5F9]">
                             {item.expression}
                           </span>
-                          <span className="text-[11px] text-slate-500 whitespace-nowrap">
+                          <span className="text-[11px] font-medium text-[#3B5578] dark:text-[#9FB3CE] whitespace-nowrap">
                             {CATEGORIES[item.category]}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-600 line-clamp-2 mt-0.5">{item.meaning}</p>
+                        <p className="text-xs text-[#3B5578] dark:text-[#9FB3CE] line-clamp-2 mt-0.5">{item.meaning}</p>
                       </div>
                     ))}
                   </div>
@@ -661,13 +900,13 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
             </div>
 
             {/* Popup Footer */}
-            <div className="px-4 py-3 bg-slate-50 border-t border-slate-200">
+            <div className="px-4 py-3 bg-[#F5F3F0] dark:bg-[#0D1626] border-t border-[#002962]/12 dark:border-[#93C5FD]/15">
               <button
                 type="button"
                 onClick={onOpenLibrary}
-                className="w-full h-9 text-[13px] font-semibold bg-white border border-slate-300 rounded-md text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                className="w-full h-9 text-[13px] font-semibold bg-[#EEF3F9] dark:bg-[#172540] hover:bg-[#E1EAF5] dark:hover:bg-[#1E3154] border border-[#002962]/20 dark:border-[#93C5FD]/25 rounded-md text-[#002962] dark:text-[#E8EEF7] transition-colors cursor-pointer"
               >
-                Open My CUET Library
+                Open THE VOCAB VAULT
               </button>
             </div>
           </div>

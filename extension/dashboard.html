@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>My CUET Library — CUET Vocabulary Builder</title>
+  <title>THE VOCAB VAULT — IPMAT/CUET VOCAB BUILDER</title>
   <link rel="stylesheet" href="dashboard.css" />
 </head>
 <body>
@@ -11,9 +11,40 @@
     <header class="site-header">
       <div class="header-inner">
         <div class="brand-group">
-          <h1 class="site-title">CUET Vocabulary Builder</h1>
+          <h1 class="site-title">IPMAT/CUET VOCAB BUILDER</h1>
         </div>
         <nav class="header-actions" aria-label="Library actions">
+          <div id="daily-goal-wrap" class="daily-goal-wrap">
+            <button type="button" id="btn-daily-goal" class="daily-goal-btn" aria-expanded="false">
+              <span id="daily-streak-text" class="daily-streak-text">🔥 0d</span>
+              <span class="daily-sep" aria-hidden="true">|</span>
+              <span id="daily-progress-text" class="daily-progress-text">0/5 today</span>
+            </button>
+            <div id="daily-goal-popover" class="daily-goal-popover" hidden role="dialog" aria-label="Daily goal settings">
+              <div class="daily-pop-head">
+                <div>
+                  <strong class="daily-pop-title">Daily Goal</strong>
+                  <p id="daily-pop-sub" class="daily-pop-sub">0 of 5 words saved today</p>
+                </div>
+                <span id="daily-pop-streak" class="daily-pop-streak">🔥 0 days</span>
+              </div>
+              <div class="daily-pop-track">
+                <div id="daily-pop-fill" class="daily-pop-fill" style="width: 0%"></div>
+              </div>
+              <form id="daily-goal-form" class="daily-goal-form">
+                <label for="daily-goal-input" class="field-label">Target words per day (1–50)</label>
+                <div class="daily-goal-row">
+                  <input type="number" id="daily-goal-input" class="text-input" min="1" max="50" value="5" />
+                  <button type="submit" class="primary-btn">Save Goal</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          <button type="button" id="btn-study-mode" class="accent-btn">Study Mode</button>
+          <button type="button" id="btn-quiz-mode" class="outline-accent-btn">Quiz Mode</button>
+          <button type="button" id="btn-toggle-insights" class="secondary-btn" aria-expanded="true">Hide Insights</button>
+          <button type="button" id="btn-download-csv" class="primary-btn">Download CSV</button>
+          <button type="button" id="btn-download-pdf" class="secondary-btn">Download PDF</button>
           <button type="button" id="btn-toggle-add" class="secondary-btn">Add Entries</button>
           <button type="button" id="btn-toggle-backup" class="secondary-btn">Backup &amp; Export</button>
           <a href="settings.html" class="nav-link">Settings</a>
@@ -71,14 +102,165 @@
           <button type="button" id="btn-close-backup" class="text-btn">Close</button>
         </div>
         <p class="backup-note">
-          All entries are stored locally in Brave. Uninstalling this extension may permanently remove your locally stored data, so export a JSON backup periodically. Exported files never include your Gemini API key.
+          All entries are stored locally in your browser. Uninstalling this extension may permanently remove your locally stored data, so export a JSON backup periodically. Exported files never include your Gemini API key.
         </p>
         <div class="backup-actions">
           <button type="button" id="btn-export-json" class="secondary-btn">Export JSON Backup</button>
           <button type="button" id="btn-import-json" class="secondary-btn">Import JSON Backup</button>
           <input type="file" id="import-file-input" accept=".json,application/json" hidden />
-          <button type="button" id="btn-export-csv" class="secondary-btn">Export All as CSV</button>
+          <button type="button" id="btn-export-csv" class="secondary-btn">Download CSV</button>
+          <button type="button" id="btn-export-pdf" class="secondary-btn">Download as PDF</button>
+          <button type="button" id="btn-export-anki" class="secondary-btn">Export Anki (.tsv)</button>
+          <button type="button" id="btn-sheet-push" class="secondary-btn">Push to Sheet</button>
+          <button type="button" id="btn-sheet-pull" class="secondary-btn">Pull from Sheet</button>
           <button type="button" id="btn-clear-library" class="danger-btn">Clear Library</button>
+        </div>
+        <p id="sheet-sync-note" class="backup-note sheet-sync-note" hidden></p>
+      </section>
+
+      <!-- Mastery Progress Overview -->
+      <section class="mastery-card" aria-label="Mastery progress">
+        <div class="mastery-head">
+          <div>
+            <h2 class="mastery-title">Mastery Progress</h2>
+            <p id="mastery-counts" class="mastery-counts">0 mastered · 0 learning · 0 new</p>
+          </div>
+          <div id="mastery-percent" class="mastery-percent">0% Mastered</div>
+        </div>
+        <div
+          id="mastery-progressbar"
+          class="mastery-track"
+          role="progressbar"
+          aria-label="Library mastery progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div id="mastery-fill-mastered" class="mastery-fill-mastered" style="width: 0%"></div>
+          <div id="mastery-fill-learning" class="mastery-fill-learning" style="width: 0%"></div>
+        </div>
+      </section>
+
+      <!-- Unlockable Mastery Badges -->
+      <section class="badges-card" aria-label="Mastery badges">
+        <div class="badges-head">
+          <div class="badges-title-row">
+            <h2 class="mastery-title">Mastery Badges</h2>
+            <p id="badges-summary" class="badges-summary">0 of 5 unlocked · 0 words mastered</p>
+          </div>
+          <p id="badges-rank-status" class="badges-rank-status">Master 1 word to unlock Novice</p>
+        </div>
+        <div id="badges-grid" class="badges-grid" role="list" aria-label="Unlockable vocabulary mastery badges"></div>
+      </section>
+
+      <!-- Flashcard Study Mode Panel -->
+      <section id="study-panel" class="study-panel" hidden aria-label="Flashcard Study Mode">
+        <div class="study-topbar">
+          <div>
+            <h2 id="study-heading" class="panel-title">Study Mode</h2>
+            <p class="study-subtitle">Recall the meaning first, then flip the card to reveal it.</p>
+          </div>
+          <div class="study-controls">
+            <label for="study-deck-select" class="sr-only">Study deck</label>
+            <select id="study-deck-select" class="select-input">
+              <option value="all">All Collections</option>
+              <option value="needsReview">Needs Review</option>
+              <option value="vocabulary">Vocabulary</option>
+              <option value="idioms">Idioms</option>
+              <option value="phrasalVerbs">Phrasal Verbs</option>
+            </select>
+            <button type="button" id="btn-study-shuffle" class="secondary-btn">Shuffle</button>
+            <button type="button" id="btn-study-exit" class="secondary-btn">Exit Study Mode</button>
+          </div>
+        </div>
+        <div id="study-stage" class="study-stage"></div>
+      </section>
+
+      <!-- Multiple-Choice Quiz Mode Panel -->
+      <section id="quiz-panel" class="study-panel" hidden aria-label="Multiple-Choice Quiz Mode">
+        <div class="study-topbar">
+          <div>
+            <h2 class="panel-title">Quiz Mode</h2>
+            <p class="study-subtitle">Multiple-choice recall quiz (5–20 questions) from your New and Learning entries.</p>
+          </div>
+          <div class="study-controls">
+            <button type="button" id="btn-quiz-setup" class="secondary-btn" hidden>Quiz Setup</button>
+            <button type="button" id="btn-quiz-exit" class="secondary-btn">Exit Quiz Mode</button>
+          </div>
+        </div>
+        <div id="quiz-stage" class="study-stage"></div>
+      </section>
+
+      <div id="library-list-view">
+      <!-- Top Real-Time Search, Sort & Filter Toolbar -->
+      <section class="toolbar" aria-label="Search and filter entries">
+        <div class="search-wrap">
+          <label for="search-input" class="sr-only">Search by word, meaning, or source title</label>
+          <input
+            type="text"
+            role="searchbox"
+            autocomplete="off"
+            id="search-input"
+            class="search-input"
+            placeholder="Search by word, meaning, or source title…"
+          />
+          <button
+            type="button"
+            id="btn-clear-search"
+            class="search-clear-btn"
+            aria-label="Clear search"
+            hidden
+          >
+            Clear
+          </button>
+        </div>
+
+        <div class="toolbar-controls">
+          <div class="control-group">
+            <label for="filter-select" class="sr-only">Filter by mastery level</label>
+            <select id="filter-select" class="select-input">
+              <option value="all">All levels</option>
+              <option value="new">New</option>
+              <option value="learning">Learning</option>
+              <option value="mastered">Mastered</option>
+              <option value="favourites">Favourites</option>
+            </select>
+          </div>
+
+          <div class="control-group">
+            <label for="sort-select" class="sr-only">Sort order</label>
+            <select id="sort-select" class="select-input">
+              <option value="recent">Recently added</option>
+              <option value="az">Alphabetical (A–Z)</option>
+              <option value="za">Alphabetical (Z–A)</option>
+            </select>
+          </div>
+        </div>
+      </section>
+      <p id="search-meta" class="search-meta" hidden></p>
+
+      <!-- Insights Summary & Bar Charts -->
+      <section id="insights-panel" class="insights-panel" aria-label="Library insights">
+        <div class="insights-head">
+          <div>
+            <h2 class="mastery-title">Insights</h2>
+            <p class="insights-sub">Category coverage and mastery distribution across your saved collection.</p>
+          </div>
+          <div class="mastery-toggle" role="group" aria-label="Category chart metric">
+            <button type="button" id="btn-insights-mastered" class="mastery-opt is-active is-mastered" aria-pressed="true">Learned</button>
+            <button type="button" id="btn-insights-all" class="mastery-opt" aria-pressed="false">All Entries</button>
+          </div>
+        </div>
+        <div id="insights-kpis" class="insights-kpis"></div>
+        <div class="insights-grid">
+          <div class="insight-card">
+            <h3 class="insight-card-title" id="insight-cat-title">Learned per Category</h3>
+            <div id="insight-cat-bars" class="insight-bars"></div>
+          </div>
+          <div class="insight-card">
+            <h3 class="insight-card-title">Mastery Distribution</h3>
+            <div id="insight-mastery-bars" class="insight-bars"></div>
+          </div>
         </div>
       </section>
 
@@ -116,44 +298,11 @@
         </button>
       </div>
 
-      <!-- Search, Sort & Filter Toolbar -->
-      <section class="toolbar" aria-label="Search and filter entries">
-        <div class="search-wrap">
-          <label for="search-input" class="sr-only">Search entries</label>
-          <input
-            type="search"
-            id="search-input"
-            class="search-input"
-            placeholder="Search expressions, meanings, or examples…"
-          />
-        </div>
-
-        <div class="toolbar-controls">
-          <div class="control-group">
-            <label for="filter-select" class="sr-only">Filter status</label>
-            <select id="filter-select" class="select-input">
-              <option value="all">All entries</option>
-              <option value="unlearned">Unlearned</option>
-              <option value="learned">Learned</option>
-              <option value="favourites">Favourites</option>
-            </select>
-          </div>
-
-          <div class="control-group">
-            <label for="sort-select" class="sr-only">Sort order</label>
-            <select id="sort-select" class="select-input">
-              <option value="recent">Recently added</option>
-              <option value="az">Alphabetical (A–Z)</option>
-              <option value="za">Alphabetical (Z–A)</option>
-            </select>
-          </div>
-        </div>
-      </section>
-
       <!-- Entries List -->
       <section aria-live="polite" aria-label="Saved entries">
         <div id="entries-list" class="entries-list"></div>
       </section>
+      </div>
     </main>
   </div>
 
@@ -210,6 +359,46 @@
         <button type="button" id="btn-confirm-proceed" class="danger-solid-btn">Delete</button>
       </div>
     </div>
+  </dialog>
+
+  <!-- Printable PDF Study Sheet Dialog -->
+  <dialog id="pdf-dialog" class="modal-dialog modal-narrow" aria-labelledby="pdf-dialog-title">
+    <form id="pdf-form" class="modal-form" method="dialog">
+      <div class="modal-head">
+        <h2 id="pdf-dialog-title" class="modal-title">Download Printable Study Sheet (PDF)</h2>
+        <button type="button" id="btn-pdf-close" class="text-btn">Close</button>
+      </div>
+
+      <p class="confirm-text">
+        Generate an A4 printable PDF study sheet with expression, meaning, example sentence, and mastery level.
+      </p>
+
+      <div class="field">
+        <label for="pdf-category-select" class="field-label">Category filter</label>
+        <select id="pdf-category-select" class="select-input">
+          <option value="all">All Categories</option>
+          <option value="vocabulary">Words (Vocabulary)</option>
+          <option value="idioms">Idioms</option>
+          <option value="phrasalVerbs">Phrasal Verbs</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="pdf-sort-select" class="field-label">Order in study sheet</label>
+        <select id="pdf-sort-select" class="select-input">
+          <option value="az">Alphabetical (A–Z) — best for revision</option>
+          <option value="recent">Recently added first</option>
+          <option value="za">Reverse alphabetical (Z–A)</option>
+        </select>
+      </div>
+
+      <div id="pdf-preview-note" class="pdf-preview-note"></div>
+
+      <div class="modal-actions">
+        <button type="button" id="btn-pdf-cancel" class="secondary-btn">Cancel</button>
+        <button type="submit" id="btn-pdf-confirm" class="primary-btn">Download PDF Study Sheet</button>
+      </div>
+    </form>
   </dialog>
 
   <script src="shared.js"></script>

@@ -8,6 +8,54 @@ const STORAGE_KEYS = {
 
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
+async function updateActionBadge() {
+  try {
+    if (!chrome.action || typeof chrome.action.setBadgeText !== 'function') return;
+    const [entries, settings] = await Promise.all([getEntries(), getSettings()]);
+    const badge = CUETShared.getToolbarBadgeText(entries, settings.dailyGoalTarget);
+    await chrome.action.setBadgeText({ text: badge.text });
+    await chrome.action.setBadgeBackgroundColor({
+      color: badge.isGoalReached ? '#0f766e' : '#081C33',
+    });
+  } catch {
+    // Ignore badge errors in restricted contexts
+  }
+}
+
+function registerContextMenus() {
+  try {
+    if (!chrome.contextMenus) return;
+    chrome.contextMenus.removeAll(() => {
+      void chrome.runtime.lastError;
+      chrome.contextMenus.create(
+        {
+          id: 'save-to-vocab-builder',
+          title: 'Save to IPMAT/CUET VOCAB BUILDER',
+          contexts: ['selection'],
+        },
+        () => {
+          void chrome.runtime.lastError;
+        }
+      );
+    });
+  } catch {
+    // Ignore context menu registration errors in test contexts
+  }
+}
+
+async function flashBadgeStatus(text, bgColor) {
+  try {
+    if (!chrome.action || typeof chrome.action.setBadgeText !== 'function') return;
+    await chrome.action.setBadgeText({ text });
+    await chrome.action.setBadgeBackgroundColor({ color: bgColor });
+    setTimeout(() => {
+      void updateActionBadge();
+    }, 3200);
+  } catch {
+    // Ignore badge errors
+  }
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await chrome.storage.local.get([STORAGE_KEYS.entries, STORAGE_KEYS.settings]);
   const updates = {};
@@ -20,7 +68,64 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (Object.keys(updates).length > 0) {
     await chrome.storage.local.set(updates);
   }
+  registerContextMenus();
+  await updateActionBadge();
 });
+
+registerContextMenus();
+updateActionBadge();
+
+if (chrome.contextMenus && chrome.contextMenus.onClicked) {
+  chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+    if (info.menuItemId !== 'save-to-vocab-builder' || !info.selectionText) return;
+    const rawSelection = info.selectionText;
+
+    if (tab && typeof tab.id === 'number' && tab.id >= 0) {
+      try {
+        const res = await chrome.tabs.sendMessage(tab.id, {
+          type: 'TRIGGER_CONTEXT_SAVE',
+          payload: {
+            selectionText: rawSelection,
+            pageTitle: tab.title || '',
+            pageUrl: info.pageUrl || tab.url || '',
+          },
+        });
+        if (res && res.handled) return;
+      } catch {
+        // Fallback below handles embedded PDFs and restricted pages where content scripts cannot run
+      }
+    }
+
+    const result = await analyseSingleExpression({
+      expression: rawSelection,
+      category: 'auto',
+      contextSentence: '',
+      sourceTitle: (tab && tab.title) || 'Right-click capture',
+      sourceUrl: info.pageUrl || (tab && tab.url) || '',
+    }).catch((err) => ({ ok: false, error: err instanceof Error ? err.message : 'Save failed.' }));
+
+    if (result && result.ok) {
+      await flashBadgeStatus('+1', '#0f766e');
+    } else if (result && result.duplicate) {
+      await flashBadgeStatus('SAV', '#002962');
+    } else {
+      await flashBadgeStatus('!', '#b91c1c');
+    }
+  });
+}
+
+if (chrome.commands && chrome.commands.onCommand) {
+  chrome.commands.onCommand.addListener(async (command) => {
+    if (command !== 'save-selected-vocab') return;
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!activeTab || typeof activeTab.id !== 'number') return;
+      await chrome.tabs.sendMessage(activeTab.id, { type: 'TRIGGER_SHORTCUT_SAVE' }).catch(() => null);
+    } catch {
+      // Ignore restricted tabs cleanly
+    }
+  });
+}
 
 async function getEntries() {
   const data = await chrome.storage.local.get(STORAGE_KEYS.entries);
@@ -29,6 +134,7 @@ async function getEntries() {
 
 async function saveEntries(entries) {
   await chrome.storage.local.set({ [STORAGE_KEYS.entries]: entries });
+  await updateActionBadge();
 }
 
 async function getSettings() {
@@ -39,10 +145,8 @@ async function getSettings() {
   };
 }
 
-function getActiveModel(settings) {
-  const custom = (settings.customModel || '').trim();
-  if (custom) return custom;
-  return (settings.model || CUETShared.DEFAULT_SETTINGS.model).trim();
+function getActiveModel() {
+  return CUETShared.GEMINI_MODEL;
 }
 
 function isExtensionPage(sender) {
@@ -117,7 +221,7 @@ async function callGeminiApi(apiKey, model, prompt) {
       throw new Error('Gemini API key was rejected (403). Verify your key in Settings.');
     }
     if (status === 404) {
-      throw new Error(`Model "${model}" was not found. Select another Gemini model in Settings.`);
+      throw new Error(`Model "${model}" is temporarily unavailable from the Gemini API. Verify your API key in Settings.`);
     }
     if (status === 429) {
       throw new Error('Gemini rate limit reached. Wait a few seconds and try again.');
@@ -174,8 +278,21 @@ async function appendEntryToGoogleSheet(webhookUrl, payload) {
       };
     }
 
-    const data = await response.json().catch(() => null);
-    if (data && data.ok === false) {
+    const rawText = await response.text().catch(() => '');
+    let data = null;
+    try {
+      data = rawText ? JSON.parse(rawText) : null;
+    } catch {
+      data = null;
+    }
+    if (!data) {
+      return {
+        attempted: true,
+        synced: false,
+        error: 'Apps Script returned a sign-in page instead of JSON. Re-deploy your Web App with "Who has access: Anyone".',
+      };
+    }
+    if (data.ok === false) {
       return {
         attempted: true,
         synced: false,
@@ -195,6 +312,46 @@ async function appendEntryToGoogleSheet(webhookUrl, payload) {
       error: 'Could not reach your Google Sheet Web App URL.',
     };
   }
+}
+
+async function callAppsScriptAction(webhookUrl, body) {
+  const url = typeof webhookUrl === 'string' ? webhookUrl.trim() : '';
+  if (!url) {
+    throw new Error('Add your Google Apps Script Web App URL in Settings first.');
+  }
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec/i.test(url)) {
+    throw new Error('Invalid Google Apps Script Web App URL. Check Settings.');
+  }
+
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      redirect: 'follow',
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error('Could not reach your Apps Script URL. Verify "Who has access" is set to "Anyone".');
+  }
+
+  if (!response.ok) {
+    throw new Error(`Google Sheet sync returned HTTP ${response.status}.`);
+  }
+
+  const rawText = await response.text();
+  let data = null;
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    throw new Error('Apps Script returned a sign-in page instead of JSON. Re-deploy with "Who has access: Anyone".');
+  }
+
+  if (!data || data.ok === false) {
+    throw new Error((data && data.error) || 'Apps Script rejected the request.');
+  }
+
+  return data;
 }
 
 async function analyseSingleExpression({ expression, category, contextSentence, sourceTitle, sourceUrl }) {
@@ -236,6 +393,7 @@ async function analyseSingleExpression({ expression, category, contextSentence, 
     sourceUrl: (sourceUrl || '').trim(),
     dateAdded: new Date().toISOString(),
     learned: false,
+    masteryLevel: 'new',
     favourite: false,
   };
 
@@ -299,10 +457,10 @@ async function handleReanalyseEntry(id) {
   return { ok: true, entry: updated };
 }
 
-async function handleTestConnection({ apiKey, model }) {
+async function handleTestConnection({ apiKey }) {
   const settings = await getSettings();
   const keyToTest = typeof apiKey === 'string' && apiKey.trim() ? apiKey.trim() : settings.apiKey;
-  const modelToTest = typeof model === 'string' && model.trim() ? model.trim() : getActiveModel(settings);
+  const modelToTest = getActiveModel();
 
   const prompt = CUETShared.buildGeminiPrompt('pragmatic', 'vocabulary', '');
   const rawText = await callGeminiApi(keyToTest, modelToTest, prompt);
@@ -332,7 +490,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             entries,
             counts: CUETShared.getCategoryCounts(entries),
             hasApiKey: Boolean(settings.apiKey && settings.apiKey.trim()),
+            hasSheetWebhook: Boolean(settings.sheetWebhookUrl && settings.sheetWebhookUrl.trim()),
+            inPageHighlighter: settings.inPageHighlighter !== false,
             activeModel: getActiveModel(settings),
+            dailyGoalTarget: CUETShared.clampDailyGoal(settings.dailyGoalTarget),
+          });
+          return;
+        }
+
+        case 'GET_HIGHLIGHTER_STATE': {
+          const settings = await getSettings();
+          const enabled = settings.inPageHighlighter !== false;
+          if (!enabled) {
+            sendResponse({ ok: true, enabled: false, entries: [] });
+            return;
+          }
+          const entries = await getEntries();
+          const highlightable = CUETShared.getHighlightableEntries(entries).map((e) => ({
+            id: e.id,
+            expression: e.expression,
+            category: e.category,
+            meaning: e.meaning,
+            example: e.example,
+            masteryLevel: CUETShared.getMasteryLevel(e),
+          }));
+          sendResponse({ ok: true, enabled: true, entries: highlightable });
+          return;
+        }
+
+        case 'LOOKUP_ENTRY': {
+          const entries = await getEntries();
+          const match = CUETShared.findDuplicate(entries, message.payload?.expression || '');
+          sendResponse({
+            ok: true,
+            entry: match
+              ? {
+                  id: match.id,
+                  expression: match.expression,
+                  category: match.category,
+                  meaning: match.meaning,
+                  example: match.example,
+                  masteryLevel: CUETShared.getMasteryLevel(match),
+                }
+              : null,
           });
           return;
         }
@@ -378,6 +578,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }
 
+          const nextMastery =
+            patch && CUETShared.VALID_MASTERY_LEVELS.includes(patch.masteryLevel)
+              ? patch.masteryLevel
+              : typeof patch?.learned === 'boolean'
+                ? patch.learned
+                  ? 'mastered'
+                  : 'new'
+                : CUETShared.getMasteryLevel(current);
+
           const updated = {
             ...current,
             expression: nextExpression,
@@ -393,7 +602,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               patch && typeof patch.example === 'string' && patch.example.trim()
                 ? patch.example.trim()
                 : current.example,
-            learned: typeof patch?.learned === 'boolean' ? patch.learned : current.learned,
+            learned: nextMastery === 'mastered',
+            masteryLevel: nextMastery,
             favourite: typeof patch?.favourite === 'boolean' ? patch.favourite : current.favourite,
           };
 
@@ -496,6 +706,76 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
 
+        case 'EXPORT_ANKI_TSV': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const entries = await getEntries();
+          const tsv = CUETShared.buildAnkiTsv(entries);
+          sendResponse({ ok: true, tsv, count: entries.length });
+          return;
+        }
+
+        case 'PUSH_TO_SHEET': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const settings = await getSettings();
+          const entries = await getEntries();
+          if (entries.length === 0) {
+            sendResponse({ ok: true, addedCount: 0, skippedCount: 0 });
+            return;
+          }
+          const rows = [...entries].reverse().map((e) => ({
+            category: e.category,
+            expression: String(e.expression || '').trim(),
+            meaning: String(e.meaning || '').trim(),
+            example: String(e.example || '').trim(),
+          }));
+          const data = await callAppsScriptAction(settings.sheetWebhookUrl, {
+            action: 'syncBatch',
+            rows,
+          });
+          sendResponse({
+            ok: true,
+            addedCount: typeof data.addedCount === 'number' ? data.addedCount : rows.length,
+            skippedCount: typeof data.skippedCount === 'number' ? data.skippedCount : 0,
+          });
+          return;
+        }
+
+        case 'PULL_FROM_SHEET': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const settings = await getSettings();
+          const data = await callAppsScriptAction(settings.sheetWebhookUrl, {
+            action: 'pullAll',
+          });
+          if (!Array.isArray(data.rows)) {
+            sendResponse({
+              ok: false,
+              error: 'Your deployed Apps Script is an older version without Pull support. Copy the updated script from Settings and deploy a new Web app version.',
+            });
+            return;
+          }
+          const entries = await getEntries();
+          const merged = CUETShared.mergePulledSheetEntries(entries, data.rows);
+          await saveEntries(merged.mergedEntries);
+          sendResponse({
+            ok: true,
+            entries: merged.mergedEntries,
+            addedCount: merged.addedCount,
+            updatedCount: merged.updatedCount,
+            unchangedCount: merged.unchangedCount,
+            counts: CUETShared.getCategoryCounts(merged.mergedEntries),
+          });
+          return;
+        }
+
         case 'GET_SETTINGS': {
           // Never expose API key to webpage content scripts
           if (!isExtensionPage(sender)) {
@@ -512,23 +792,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ ok: false, error: 'Unauthorized action.' });
             return;
           }
+          const existingSettings = await getSettings();
           const next = {
             apiKey: typeof message.payload?.apiKey === 'string' ? message.payload.apiKey.trim() : '',
-            model:
-              typeof message.payload?.model === 'string' && message.payload.model.trim()
-                ? message.payload.model.trim()
-                : CUETShared.DEFAULT_SETTINGS.model,
-            customModel:
-              typeof message.payload?.customModel === 'string'
-                ? message.payload.customModel.trim()
-                : '',
+            model: CUETShared.GEMINI_MODEL,
             sheetWebhookUrl:
               typeof message.payload?.sheetWebhookUrl === 'string'
                 ? message.payload.sheetWebhookUrl.trim()
                 : '',
+            dailyGoalTarget:
+              message.payload && message.payload.dailyGoalTarget != null
+                ? CUETShared.clampDailyGoal(message.payload.dailyGoalTarget)
+                : CUETShared.clampDailyGoal(existingSettings.dailyGoalTarget),
+            inPageHighlighter:
+              typeof message.payload?.inPageHighlighter === 'boolean'
+                ? message.payload.inPageHighlighter
+                : existingSettings.inPageHighlighter !== false,
           };
           await chrome.storage.local.set({ [STORAGE_KEYS.settings]: next });
-          sendResponse({ ok: true, settings: next, activeModel: getActiveModel(next) });
+          await updateActionBadge();
+          sendResponse({ ok: true, settings: next, activeModel: getActiveModel() });
+          return;
+        }
+
+        case 'SAVE_DAILY_GOAL': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const existingSettings = await getSettings();
+          const target = CUETShared.clampDailyGoal(message.payload?.target);
+          const next = { ...existingSettings, dailyGoalTarget: target };
+          await chrome.storage.local.set({ [STORAGE_KEYS.settings]: next });
+          await updateActionBadge();
+          sendResponse({ ok: true, dailyGoalTarget: target });
           return;
         }
 

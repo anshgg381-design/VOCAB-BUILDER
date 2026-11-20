@@ -1,43 +1,45 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Moon, Sun } from 'lucide-react';
 import { LivePreviewView } from './components/LivePreviewView';
 import { LibraryDashboardView } from './components/LibraryDashboardView';
-import { ExtensionFilesView } from './components/ExtensionFilesView';
 import { InstallGuideView } from './components/InstallGuideView';
+import { HowItWorksView } from './components/HowItWorksView';
 import { GoogleSheetsController } from './components/GoogleSheetsBar';
+import { DailyGoalHeaderWidget } from './components/DailyGoalHeaderWidget';
 import { downloadExtensionZip } from './utils/extensionBundle';
 import {
-  clearCachedAccessToken,
-  getAccessToken,
-  googleSignIn,
-  initAuth,
-  logout,
-} from './utils/googleAuth';
-import {
-  ConnectedSheet,
-  SheetAuthExpiredError,
-  SheetInspection,
-  appendEntryToSheet,
-  createVocabularySpreadsheet,
-  ensureSpreadsheetTabsAndHeaders,
-  inspectSpreadsheet,
-  parseSpreadsheetId,
-  syncLibraryEntriesToSheet,
+  appendEntryViaAppsScript,
+  isValidAppsScriptUrl,
+  pullLibraryViaAppsScript,
+  syncLibraryViaAppsScript,
+  validateAppsScriptUrlInput,
 } from './utils/googleSheets';
 import {
   CATEGORIES,
   Category,
+  DEFAULT_DAILY_GOAL,
+  ExamTargetConfig,
   INITIAL_DEMO_ENTRIES,
   VocabEntry,
+  calculateReviewPatch,
+  clampDailyGoal,
+  computeDailyGoalStats,
   findDuplicate,
   generateId,
+  mergePulledSheetEntries,
   normalizeExpression,
   normalizeKey,
+  recordEntryMissPatch,
 } from './utils/vocabLogic';
 
-type ActiveSection = 'preview' | 'library' | 'files' | 'guide';
+type ActiveSection = 'preview' | 'library' | 'howItWorks' | 'guide';
+type ThemeMode = 'light' | 'dark';
 
 const STORAGE_KEY = 'cuet_vocab_workbench_entries_v1';
-const SHEET_META_STORAGE_KEY = 'cuet_google_sheet_connection_v1';
+const APPS_SCRIPT_STORAGE_KEY = 'cuet_apps_script_webhook_v1';
+const DAILY_GOAL_STORAGE_KEY = 'cuet_daily_goal_target_v1';
+const EXAM_COUNTDOWN_STORAGE_KEY = 'cuet_exam_countdown_v1';
+const THEME_STORAGE_KEY = 'cuet_theme_mode_v1';
 
 export interface SheetSyncOutcome {
   attempted: boolean;
@@ -66,18 +68,21 @@ function loadInitialEntries(): VocabEntry[] {
   }
 }
 
-function loadSavedSheetConnection(): ConnectedSheet | null {
+function loadSavedDailyGoal(): number {
   try {
-    const raw = window.localStorage.getItem(SHEET_META_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (
-      parsed &&
-      typeof parsed.spreadsheetId === 'string' &&
-      typeof parsed.spreadsheetUrl === 'string' &&
-      typeof parsed.title === 'string'
-    ) {
-      return parsed;
+    const raw = window.localStorage.getItem(DAILY_GOAL_STORAGE_KEY);
+    if (!raw) return DEFAULT_DAILY_GOAL;
+    return clampDailyGoal(Number(raw));
+  } catch {
+    return DEFAULT_DAILY_GOAL;
+  }
+}
+
+function loadSavedAppsScriptUrl(): string | null {
+  try {
+    const raw = window.localStorage.getItem(APPS_SCRIPT_STORAGE_KEY);
+    if (raw && isValidAppsScriptUrl(raw)) {
+      return raw.trim();
     }
     return null;
   } catch {
@@ -85,16 +90,99 @@ function loadSavedSheetConnection(): ConnectedSheet | null {
   }
 }
 
+function loadSavedExamConfig(): ExamTargetConfig | null {
+  try {
+    const raw = window.localStorage.getItem(EXAM_COUNTDOWN_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.examDate === 'string' &&
+      /^\d{4}-\d{2}-\d{2}$/.test(parsed.examDate)
+    ) {
+      return {
+        examName: typeof parsed.examName === 'string' && parsed.examName.trim() ? parsed.examName.trim() : 'CUET',
+        examDate: parsed.examDate,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function loadSavedTheme(): ThemeMode {
+  try {
+    return window.localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
 export default function App() {
   const [section, setSection] = useState<ActiveSection>('preview');
   const [entries, setEntries] = useState<VocabEntry[]>(loadInitialEntries);
+  const [dailyGoalTarget, setDailyGoalTarget] = useState<number>(loadSavedDailyGoal);
+  const [examConfig, setExamConfig] = useState<ExamTargetConfig | null>(loadSavedExamConfig);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(loadSavedTheme);
+  const [isCelebratingGoal, setIsCelebratingGoal] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
 
-  // Google Sheets OAuth state (access token is kept strictly in memory in googleAuth.ts)
-  const [isSignedIn, setIsSignedIn] = useState(false);
-  const [isSigningIn, setIsSigningIn] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [connectedSheet, setConnectedSheet] = useState<ConnectedSheet | null>(loadSavedSheetConnection);
+  const dailyGoalStats = useMemo(
+    () => computeDailyGoalStats(entries, dailyGoalTarget),
+    [entries, dailyGoalTarget]
+  );
+  const prevGoalReachedRef = useRef<boolean>(dailyGoalStats.goalReached);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', themeMode === 'dark');
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [themeMode]);
+
+  useEffect(() => {
+    try {
+      if (examConfig) {
+        window.localStorage.setItem(EXAM_COUNTDOWN_STORAGE_KEY, JSON.stringify(examConfig));
+      } else {
+        window.localStorage.removeItem(EXAM_COUNTDOWN_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [examConfig]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [section]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DAILY_GOAL_STORAGE_KEY, String(dailyGoalTarget));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [dailyGoalTarget]);
+
+  useEffect(() => {
+    const wasReached = prevGoalReachedRef.current;
+    prevGoalReachedRef.current = dailyGoalStats.goalReached;
+    if (!wasReached && dailyGoalStats.goalReached) {
+      setIsCelebratingGoal(true);
+      const timer = window.setTimeout(() => setIsCelebratingGoal(false), 3600);
+      return () => window.clearTimeout(timer);
+    }
+    if (!dailyGoalStats.goalReached) {
+      setIsCelebratingGoal(false);
+    }
+  }, [dailyGoalStats.goalReached]);
+
+  // Google Sheets Apps Script state
+  const [appsScriptUrl, setAppsScriptUrl] = useState<string | null>(loadSavedAppsScriptUrl);
   const [isSheetBusy, setIsSheetBusy] = useState(false);
   const [sheetStatus, setSheetStatus] = useState<{
     text: string;
@@ -102,30 +190,16 @@ export default function App() {
   } | null>(null);
 
   useEffect(() => {
-    const unsubscribe = initAuth(
-      (user) => {
-        setIsSignedIn(true);
-        setUserEmail(user.email || user.displayName || null);
-      },
-      () => {
-        setIsSignedIn(false);
-        setUserEmail(null);
-      }
-    );
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
     try {
-      if (connectedSheet) {
-        window.localStorage.setItem(SHEET_META_STORAGE_KEY, JSON.stringify(connectedSheet));
+      if (appsScriptUrl) {
+        window.localStorage.setItem(APPS_SCRIPT_STORAGE_KEY, appsScriptUrl);
       } else {
-        window.localStorage.removeItem(SHEET_META_STORAGE_KEY);
+        window.localStorage.removeItem(APPS_SCRIPT_STORAGE_KEY);
       }
     } catch {
       // Ignore storage quota errors
     }
-  }, [connectedSheet]);
+  }, [appsScriptUrl]);
 
   const handleDownloadZip = async () => {
     if (downloadingZip) return;
@@ -147,172 +221,92 @@ export default function App() {
     }
   }, [entries]);
 
-  const handleSheetAuthExpired = () => {
-    clearCachedAccessToken();
-    setIsSignedIn(false);
-    setSheetStatus({
-      text: 'Your Google Sheets session expired. Click Sign in with Google to resume automatic saving.',
-      tone: 'error',
-    });
-  };
-
-  const handleGoogleSignIn = async () => {
-    setIsSigningIn(true);
-    setSheetStatus(null);
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setIsSignedIn(true);
-        setUserEmail(result.user.email || result.user.displayName || null);
-        if (connectedSheet) {
-          setSheetStatus({
-            text: `Signed in. Automatic saving to "${connectedSheet.title}" is active.`,
-            tone: 'ok',
-          });
-        }
-      }
-    } catch (err) {
-      setSheetStatus({
-        text: err instanceof Error ? err.message : 'Could not sign in with Google.',
-        tone: 'error',
-      });
-    } finally {
-      setIsSigningIn(false);
+  const handleTestAndConnectAppsScript = async (
+    rawUrl: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const validation = validateAppsScriptUrlInput(rawUrl);
+    if (!validation.ok) {
+      return { ok: false, error: validation.error };
     }
-  };
 
-  const handleGoogleSignOut = async () => {
-    try {
-      await logout();
-    } finally {
-      setIsSignedIn(false);
-      setUserEmail(null);
-      setSheetStatus(null);
-    }
-  };
-
-  const handleCreateSheet = async (title: string) => {
-    const token = await getAccessToken();
-    if (!token) {
-      handleSheetAuthExpired();
-      return;
-    }
     setIsSheetBusy(true);
-    setSheetStatus({ text: 'Creating Google Sheet with Words, Idioms, and Phrasal Verbs tabs…', tone: 'neutral' });
     try {
-      const created = await createVocabularySpreadsheet(token, title);
-      setConnectedSheet(created);
+      await appendEntryViaAppsScript(validation.url, {
+        category: 'vocabulary',
+        expression: '',
+        meaning: '',
+        example: '',
+        testOnly: true,
+      });
+      setAppsScriptUrl(validation.url);
       setSheetStatus({
-        text: `Created "${created.title}" with 3 tabs (Words, Idioms, Phrasal Verbs). New entries will now save automatically.`,
+        text: 'Apps Script deployment connected. Newly analysed words will automatically save to your Google Sheet.',
         tone: 'ok',
       });
+      return { ok: true };
     } catch (err) {
-      if (err instanceof SheetAuthExpiredError) {
-        handleSheetAuthExpired();
-      } else {
-        setSheetStatus({
-          text: err instanceof Error ? err.message : 'Could not create the Google Sheet.',
-          tone: 'error',
-        });
-      }
+      const msg =
+        err instanceof Error ? err.message : 'Could not verify the Apps Script deployment URL.';
+      return { ok: false, error: msg };
     } finally {
       setIsSheetBusy(false);
     }
   };
 
-  const handleInspectExistingSheet = async (input: string): Promise<SheetInspection | null> => {
-    const spreadsheetId = parseSpreadsheetId(input);
-    if (!spreadsheetId) {
-      setSheetStatus({
-        text: 'Could not find a valid Google Sheet ID in that link. Paste the full Google Sheets URL.',
-        tone: 'error',
-      });
-      return null;
-    }
-    const token = await getAccessToken();
-    if (!token) {
-      handleSheetAuthExpired();
-      return null;
-    }
-    setIsSheetBusy(true);
+  const handleDisconnectAppsScript = () => {
+    setAppsScriptUrl(null);
     setSheetStatus(null);
-    try {
-      return await inspectSpreadsheet(token, spreadsheetId);
-    } catch (err) {
-      if (err instanceof SheetAuthExpiredError) {
-        handleSheetAuthExpired();
-      } else {
-        setSheetStatus({
-          text: err instanceof Error ? err.message : 'Could not inspect that Google Sheet.',
-          tone: 'error',
-        });
-      }
-      return null;
-    } finally {
-      setIsSheetBusy(false);
-    }
-  };
-
-  const handleConfirmConnectExisting = async (inspection: SheetInspection) => {
-    const token = await getAccessToken();
-    if (!token) {
-      handleSheetAuthExpired();
-      return;
-    }
-    setIsSheetBusy(true);
-    setSheetStatus({ text: `Preparing tabs in "${inspection.title}"…`, tone: 'neutral' });
-    try {
-      const connected = await ensureSpreadsheetTabsAndHeaders(token, inspection);
-      setConnectedSheet(connected);
-      setSheetStatus({
-        text: `Connected "${connected.title}". New entries will automatically append to Words, Idioms, and Phrasal Verbs.`,
-        tone: 'ok',
-      });
-    } catch (err) {
-      if (err instanceof SheetAuthExpiredError) {
-        handleSheetAuthExpired();
-      } else {
-        setSheetStatus({
-          text: err instanceof Error ? err.message : 'Could not prepare the Google Sheet.',
-          tone: 'error',
-        });
-      }
-    } finally {
-      setIsSheetBusy(false);
-    }
   };
 
   const handleSyncAllEntries = async () => {
-    if (!connectedSheet) return;
-    const token = await getAccessToken();
-    if (!token) {
-      handleSheetAuthExpired();
-      return;
-    }
+    if (!appsScriptUrl) return;
     setIsSheetBusy(true);
-    setSheetStatus({ text: 'Syncing saved entries to Google Sheet…', tone: 'neutral' });
+    setSheetStatus({ text: 'Syncing saved entries via Apps Script…', tone: 'neutral' });
     try {
-      const { addedCount, skippedCount } = await syncLibraryEntriesToSheet(
-        token,
-        connectedSheet.spreadsheetId,
+      const { addedCount, skippedCount } = await syncLibraryViaAppsScript(
+        appsScriptUrl,
         entries
       );
       setSheetStatus({
         text:
           addedCount > 0
-            ? `Synced ${addedCount} new ${addedCount === 1 ? 'entry' : 'entries'} to "${connectedSheet.title}" (${skippedCount} already in sheet).`
-            : `All ${skippedCount} entries are already in "${connectedSheet.title}".`,
+            ? `Synced ${addedCount} new ${addedCount === 1 ? 'entry' : 'entries'} to your Google Sheet (${skippedCount} already present).`
+            : `All ${skippedCount} entries are already in your Google Sheet.`,
         tone: 'ok',
       });
     } catch (err) {
-      if (err instanceof SheetAuthExpiredError) {
-        handleSheetAuthExpired();
-      } else {
-        setSheetStatus({
-          text: err instanceof Error ? err.message : 'Could not sync entries to Google Sheet.',
-          tone: 'error',
-        });
-      }
+      setSheetStatus({
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Could not sync entries via Apps Script deployment.',
+        tone: 'error',
+      });
+    } finally {
+      setIsSheetBusy(false);
+    }
+  };
+
+  const handlePullFromSheet = async () => {
+    if (!appsScriptUrl) return;
+    setIsSheetBusy(true);
+    setSheetStatus({ text: 'Pulling rows from Google Sheet via Apps Script…', tone: 'neutral' });
+    try {
+      const rows = await pullLibraryViaAppsScript(appsScriptUrl);
+      const merged = mergePulledSheetEntries(entries, rows);
+      setEntries(merged.mergedEntries);
+      setSheetStatus({
+        text: `Pulled from Google Sheet: ${merged.addedCount} added, ${merged.updatedCount} updated (${merged.unchangedCount} unchanged).`,
+        tone: 'ok',
+      });
+    } catch (err) {
+      setSheetStatus({
+        text:
+          err instanceof Error
+            ? err.message
+            : 'Could not pull entries via Apps Script deployment.',
+        tone: 'error',
+      });
     } finally {
       setIsSheetBusy(false);
     }
@@ -369,6 +363,7 @@ export default function App() {
         sourceUrl: params.sourceUrl.trim(),
         dateAdded: new Date().toISOString(),
         learned: false,
+        masteryLevel: 'new',
         favourite: false,
       };
 
@@ -377,34 +372,30 @@ export default function App() {
         return [newEntry, ...prev];
       });
 
-      // Automatically save to connected Google Sheet immediately after fetching the meaning
+      // Automatically save to connected Google Sheet (Apps Script Web App) immediately after fetching the meaning
       let sheetSync: SheetSyncOutcome = { attempted: false, synced: false };
-      const token = await getAccessToken();
-      if (token && connectedSheet) {
+      if (appsScriptUrl) {
         sheetSync.attempted = true;
         try {
-          const { tabName } = await appendEntryToSheet(token, connectedSheet.spreadsheetId, newEntry);
+          const { tabName } = await appendEntryViaAppsScript(appsScriptUrl, {
+            category: newEntry.category,
+            expression: newEntry.expression,
+            meaning: newEntry.meaning,
+            example: newEntry.example,
+          });
           sheetSync = { attempted: true, synced: true, tabName };
           setSheetStatus({
-            text: `Auto-saved "${newEntry.expression}" to "${connectedSheet.title}" (${tabName} tab).`,
+            text: `Auto-saved "${newEntry.expression}" to your Google Sheet (${tabName} tab) via Apps Script.`,
             tone: 'ok',
           });
-        } catch (sheetErr) {
-          if (sheetErr instanceof SheetAuthExpiredError) {
-            handleSheetAuthExpired();
-            sheetSync = {
-              attempted: true,
-              synced: false,
-              error: 'Google Sheets session expired — sign in again to resume auto-save.',
-            };
-          } else {
-            const msg = sheetErr instanceof Error ? sheetErr.message : 'Google Sheets append failed.';
-            setSheetStatus({
-              text: `Saved locally, but could not append "${newEntry.expression}" to Google Sheet: ${msg}`,
-              tone: 'error',
-            });
-            sheetSync = { attempted: true, synced: false, error: msg };
-          }
+        } catch (scriptErr) {
+          const msg =
+            scriptErr instanceof Error ? scriptErr.message : 'Apps Script append failed.';
+          setSheetStatus({
+            text: `Saved locally, but could not append "${newEntry.expression}" via Apps Script: ${msg}`,
+            tone: 'error',
+          });
+          sheetSync = { attempted: true, synced: false, error: msg };
         }
       }
 
@@ -430,12 +421,83 @@ export default function App() {
       patch = { ...patch, expression: nextExpr };
     }
 
+    if (patch.masteryLevel) {
+      const srsPatch =
+        patch.nextReviewAt !== undefined
+          ? { masteryLevel: patch.masteryLevel, learned: patch.masteryLevel === 'mastered' }
+          : calculateReviewPatch(current, patch.masteryLevel, { countAsReview: true });
+      patch = { ...patch, ...srsPatch };
+    } else if (typeof patch.learned === 'boolean') {
+      const nextMastery = patch.learned ? 'mastered' : 'new';
+      const srsPatch = calculateReviewPatch(current, nextMastery, { countAsReview: true });
+      patch = { ...patch, ...srsPatch };
+    }
+
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
     return { ok: true };
   };
 
+  const handleBulkUpdateEntries = (
+    ids: string[],
+    patch: Partial<Pick<VocabEntry, 'masteryLevel' | 'category'>>
+  ) => {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    setEntries((prev) =>
+      prev.map((entry) => {
+        if (!idSet.has(entry.id)) return entry;
+        let nextPatch: Partial<VocabEntry> = { ...patch };
+        if (patch.masteryLevel) {
+          nextPatch = {
+            ...nextPatch,
+            ...calculateReviewPatch(entry, patch.masteryLevel, { countAsReview: true }),
+          };
+        }
+        return { ...entry, ...nextPatch };
+      })
+    );
+  };
+
+  const handleRecordEntryMiss = (id: string) => {
+    setEntries((prev) =>
+      prev.map((entry) =>
+        entry.id === id ? { ...entry, ...recordEntryMissPatch(entry) } : entry
+      )
+    );
+  };
+
+  const handleDeleteEntries = (ids: string[]): Array<{ entry: VocabEntry; index: number }> => {
+    const idSet = new Set(ids);
+    const removed: Array<{ entry: VocabEntry; index: number }> = [];
+    entries.forEach((entry, index) => {
+      if (idSet.has(entry.id)) {
+        removed.push({ entry, index });
+      }
+    });
+    if (removed.length > 0) {
+      setEntries((prev) => prev.filter((e) => !idSet.has(e.id)));
+    }
+    return removed;
+  };
+
+  const handleRestoreEntries = (items: Array<{ entry: VocabEntry; index: number }>) => {
+    if (items.length === 0) return;
+    setEntries((prev) => {
+      const existingIds = new Set(prev.map((e) => e.id));
+      const next = [...prev];
+      const sorted = [...items].sort((a, b) => a.index - b.index);
+      for (const item of sorted) {
+        if (existingIds.has(item.entry.id)) continue;
+        const insertAt = Math.max(0, Math.min(item.index, next.length));
+        next.splice(insertAt, 0, item.entry);
+        existingIds.add(item.entry.id);
+      }
+      return next;
+    });
+  };
+
   const handleDeleteEntry = (id: string) => {
-    setEntries((prev) => prev.filter((e) => e.id !== id));
+    handleDeleteEntries([id]);
   };
 
   const handleClearAll = () => {
@@ -480,49 +542,41 @@ export default function App() {
   };
 
   const sheetsController: GoogleSheetsController = {
-    isSignedIn,
-    isSigningIn,
-    userEmail,
-    connectedSheet,
+    appsScriptUrl,
     isBusy: isSheetBusy,
     statusMessage: sheetStatus,
-    onSignIn: handleGoogleSignIn,
-    onSignOut: handleGoogleSignOut,
-    onCreateSheet: handleCreateSheet,
-    onInspectExistingSheet: handleInspectExistingSheet,
-    onConfirmConnectExisting: handleConfirmConnectExisting,
     onSyncAllEntries: handleSyncAllEntries,
-    onDisconnectSheet: () => {
-      setConnectedSheet(null);
-      setSheetStatus(null);
-    },
+    onPullFromSheet: handlePullFromSheet,
+    onTestAndConnectAppsScript: handleTestAndConnectAppsScript,
+    onDisconnectAppsScript: handleDisconnectAppsScript,
     onDismissStatus: () => setSheetStatus(null),
     totalEntriesCount: entries.length,
+    entries,
   };
 
   const navItems: Array<{ id: ActiveSection; label: string }> = [
     { id: 'preview', label: 'Live Preview' },
-    { id: 'library', label: 'My CUET Library' },
-    { id: 'files', label: 'Extension Files' },
+    { id: 'library', label: 'THE VOCAB VAULT' },
+    { id: 'howItWorks', label: 'How It Works' },
     { id: 'guide', label: 'Install Guide' },
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900">
-      {/* Strictly compliant 3-zone Top Bar Contract */}
-      <header className="bg-white border-b border-slate-200">
-        <div className="max-w-[1200px] mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3 md:gap-8">
+    <div className="min-h-screen flex flex-col text-[#002962] dark:text-[#E8EEF7]">
+      {/* Clean 3-zone Top Bar styled in Nesoi architectural warm stone & midnight navy */}
+      <header className="sticky top-0 z-30 bg-[#F5F3F0]/90 dark:bg-[#0B1220]/90 backdrop-blur-md border-b border-[#002962]/10 dark:border-[#94B3DB]/18">
+        <div className="max-w-[1260px] mx-auto px-3.5 sm:px-6 h-16 flex items-center justify-between gap-2 sm:gap-3 xl:gap-6">
           {/* Zone 1: Single text wordmark */}
           <button
             type="button"
             onClick={() => setSection('preview')}
-            className="font-editorial text-[15px] sm:text-[18px] font-semibold tracking-tight text-slate-900 whitespace-nowrap shrink-0 cursor-pointer"
+            className="text-[12.5px] sm:text-[15.5px] font-bold tracking-[-0.02em] text-[#002962] dark:text-[#E8EEF7] whitespace-nowrap truncate min-w-0 cursor-pointer"
           >
-            CUET Vocabulary Builder
+            IPMAT/CUET VOCAB BUILDER
           </button>
 
-          {/* Zone 2: 4 clean single-line text nav links */}
-          <nav aria-label="Primary navigation" className="hidden md:flex items-center gap-7">
+          {/* Zone 2: Clean single-line text nav links */}
+          <nav aria-label="Primary navigation" className="hidden lg:flex items-center gap-4 xl:gap-6">
             {navItems.map((item) => {
               const active = section === item.id;
               return (
@@ -530,10 +584,10 @@ export default function App() {
                   key={item.id}
                   type="button"
                   onClick={() => setSection(item.id)}
-                  className={`text-sm font-medium whitespace-nowrap shrink-0 pb-0.5 transition-colors cursor-pointer ${
+                  className={`text-[13.5px] font-medium whitespace-nowrap shrink-0 pb-0.5 transition-colors cursor-pointer ${
                     active
-                      ? 'text-slate-900 border-b-2 border-teal-700'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'text-[#002962] dark:text-white font-semibold border-b-2 border-[#EA580C]'
+                      : 'text-[#3B5578] dark:text-[#9FB3CE] hover:text-[#002962] dark:hover:text-white'
                   }`}
                 >
                   {item.label}
@@ -542,22 +596,49 @@ export default function App() {
             })}
           </nav>
 
-          {/* Zone 3: 1 primary CTA */}
-          <button
-            type="button"
-            onClick={handleDownloadZip}
-            disabled={downloadingZip}
-            className="h-9 px-3 sm:px-4 inline-flex items-center justify-center text-[12.5px] sm:text-[13px] font-semibold bg-slate-900 text-white rounded-md hover:bg-slate-800 disabled:opacity-60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <span className="sm:hidden">{downloadingZip ? 'Zipping…' : 'Download ZIP'}</span>
-            <span className="hidden sm:inline">{downloadingZip ? 'Preparing ZIP…' : 'Download Extension ZIP'}</span>
-          </button>
+          {/* Zone 3: Daily Goal + Night Study Toggle + Nesoi architectural CTA */}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            <DailyGoalHeaderWidget
+              stats={dailyGoalStats}
+              isCelebrating={isCelebratingGoal}
+              onUpdateTarget={(nextTarget) => setDailyGoalTarget(clampDailyGoal(nextTarget))}
+            />
+            <button
+              type="button"
+              data-testid="theme-toggle"
+              onClick={() => setThemeMode((m) => (m === 'dark' ? 'light' : 'dark'))}
+              aria-label={
+                themeMode === 'dark'
+                  ? 'Switch to light study theme'
+                  : 'Switch to dark night study theme'
+              }
+              title={themeMode === 'dark' ? 'Light theme' : 'Night Study dark theme'}
+              className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-[#002962]/18 dark:border-[#94B3DB]/25 bg-[#002962]/[0.05] dark:bg-[#17253D] text-[#002962] dark:text-[#FDBA74] hover:bg-[#002962]/[0.09] dark:hover:bg-[#1F3150] transition-colors shrink-0 cursor-pointer"
+            >
+              {themeMode === 'dark' ? (
+                <Sun className="w-4 h-4" aria-hidden="true" />
+              ) : (
+                <Moon className="w-4 h-4" aria-hidden="true" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadZip}
+              disabled={downloadingZip}
+              className="h-9 px-3 sm:px-4 inline-flex items-center justify-center text-[12.5px] sm:text-[13px] font-semibold bg-[#002962] dark:bg-[#2563EB] text-white rounded-md hover:bg-[#001F4D] dark:hover:bg-[#1D4ED8] disabled:opacity-60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <span className="sm:hidden">{downloadingZip ? 'Zipping…' : 'ZIP'}</span>
+              <span className="hidden sm:inline">
+                {downloadingZip ? 'Preparing ZIP…' : 'Download Extension ZIP'}
+              </span>
+            </button>
+          </div>
         </div>
 
-        {/* Compact Mobile Navigation Row (only below md) */}
+        {/* Compact Tablet & Mobile Navigation Row */}
         <nav
           aria-label="Mobile navigation"
-          className="flex md:hidden items-center justify-between gap-2 px-4 py-2.5 border-t border-slate-100"
+          className="flex lg:hidden items-center justify-between gap-2 px-4 py-2.5 border-t border-[#002962]/10 dark:border-[#94B3DB]/18 overflow-x-auto"
         >
           {navItems.map((item) => {
             const active = section === item.id;
@@ -567,10 +648,18 @@ export default function App() {
                 type="button"
                 onClick={() => setSection(item.id)}
                 className={`text-[12px] font-medium whitespace-nowrap shrink-0 pb-0.5 cursor-pointer ${
-                  active ? 'text-slate-900 border-b-2 border-teal-700' : 'text-slate-600'
+                  active
+                    ? 'text-[#002962] dark:text-white font-semibold border-b-2 border-[#EA580C]'
+                    : 'text-[#3B5578] dark:text-[#9FB3CE]'
                 }`}
               >
-                {item.id === 'library' ? 'Library' : item.id === 'files' ? 'Files' : item.id === 'guide' ? 'Install' : 'Preview'}
+                {item.id === 'library'
+                  ? 'Vocab Vault'
+                  : item.id === 'howItWorks'
+                  ? 'How It Works'
+                  : item.id === 'guide'
+                  ? 'Install'
+                  : 'Preview'}
               </button>
             );
           })}
@@ -578,7 +667,7 @@ export default function App() {
       </header>
 
       {/* Main Content Container */}
-      <main className="flex-1 max-w-[1200px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-16">
+      <main className="flex-1 max-w-[1220px] w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-16">
         {section === 'preview' && (
           <LivePreviewView
             entries={entries}
@@ -586,6 +675,7 @@ export default function App() {
             onSaveAndAnalyse={handleSaveAndAnalyse}
             onOpenLibrary={() => setSection('library')}
             onOpenInstallGuide={() => setSection('guide')}
+            onOpenHowItWorks={() => setSection('howItWorks')}
           />
         )}
 
@@ -593,23 +683,36 @@ export default function App() {
           <LibraryDashboardView
             entries={entries}
             sheets={sheetsController}
+            examConfig={examConfig}
+            onUpdateExamConfig={setExamConfig}
             onSaveAndAnalyse={handleSaveAndAnalyse}
             onUpdateEntry={handleUpdateEntry}
+            onBulkUpdateEntries={handleBulkUpdateEntries}
+            onRecordEntryMiss={handleRecordEntryMiss}
             onDeleteEntry={handleDeleteEntry}
+            onDeleteEntries={handleDeleteEntries}
+            onRestoreEntries={handleRestoreEntries}
             onClearAll={handleClearAll}
             onReanalyseEntry={handleReanalyseEntry}
             onMergeImported={(merged) => setEntries(merged)}
+            onOpenInstallGuide={() => setSection('guide')}
           />
         )}
 
-        {section === 'files' && <ExtensionFilesView />}
+        {section === 'howItWorks' && (
+          <HowItWorksView
+            onOpenPreview={() => setSection('preview')}
+            onOpenInstallGuide={() => setSection('guide')}
+            onOpenLibrary={() => setSection('library')}
+          />
+        )}
 
         {section === 'guide' && <InstallGuideView />}
       </main>
 
-      <footer className="border-t border-slate-200 bg-white">
-        <div className="max-w-[1200px] mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
-          <span>CUET UG 2027 Vocabulary Collector — Brave Desktop Extension (Manifest V3)</span>
+      <footer className="border-t border-[#002962]/10 dark:border-[#94B3DB]/18 bg-white/80 dark:bg-[#0F172A]/90">
+        <div className="max-w-[1220px] mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-4 text-xs text-[#3B5578] dark:text-[#9FB3CE]">
+          <span>IPMAT/CUET VOCAB BUILDER — Manifest V3 (Chrome · Brave · Edge · Vivaldi · Opera · Arc · Chromium)</span>
           <span>Local storage + optional Google Sheets auto-save (Words · Idioms · Phrasal Verbs)</span>
         </div>
       </footer>

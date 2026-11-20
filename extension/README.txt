@@ -1,5 +1,14 @@
-CUET Vocabulary Builder — Brave Desktop Extension (Manifest V3)
-===============================================================
+IPMAT/CUET VOCAB BUILDER — Browser Extension (Manifest V3)
+==========================================================
+
+Supported Browsers (Windows & macOS):
+  - Google Chrome (chrome://extensions)
+  - Brave (brave://extensions)
+  - Microsoft Edge (edge://extensions)
+  - Vivaldi (vivaldi://extensions)
+  - Opera / Opera GX (opera://extensions)
+  - Arc (arc://extensions)
+  - Chromium / Ungoogled Chromium (chrome://extensions)
 
 1. Get a free Gemini API key
 ----------------------------
@@ -7,40 +16,57 @@ CUET Vocabulary Builder — Brave Desktop Extension (Manifest V3)
 2. Click "Get API key" in the left menu.
 3. Click "Create API key" and copy the key (starts with AIza...).
 
-2. Install in Brave Desktop
----------------------------
-1. Unzip this folder to a permanent location on your computer (for example,
-   Documents/cuet-vocabulary-builder) so you do not accidentally delete it.
-2. Open Brave and type brave://extensions in the address bar, then press Enter.
-3. Turn ON "Developer mode" (top-right corner).
+2. Install in Your Browser (Windows or Mac)
+-------------------------------------------
+1. Extract/unzip this folder to a permanent location (for example,
+   Documents/ipmat-cuet-vocab-builder) so you do not accidentally delete it.
+2. Open your browser's extensions page (e.g. chrome://extensions,
+   brave://extensions, edge://extensions, vivaldi://extensions,
+   opera://extensions, or arc://extensions).
+3. Turn ON "Developer mode" (top-right corner, or left sidebar in Edge).
 4. Click "Load unpacked".
-5. Select the folder that contains manifest.json.
-6. Pin "CUET Vocabulary Builder" from the puzzle-piece Extensions icon in Brave.
+5. Select the folder that directly contains manifest.json.
+6. Pin the extension from the puzzle-piece Extensions menu in your toolbar.
 
-3. Configure your Gemini API key
---------------------------------
-1. Click the CUET Vocabulary Builder extension icon in Brave.
-2. Click "Settings".
-3. Paste your Gemini API key, choose a model (Gemini 2.5 Flash is recommended),
-   click "Save Settings", and click "Test Gemini Connection".
+3. Configure your Gemini API key & Preferences
+----------------------------------------------
+1. Click the pinned extension icon and click "Settings".
+2. Paste your Gemini API key (powered by Gemini 3.1 Flash Lite), set your
+   Daily Study Goal, and toggle the optional In-Page Word Highlighter.
+3. Click "Save Settings", then click "Test Gemini Connection".
 
-4. Optional: Auto-Save to Google Sheets (3 Tabs)
+4. Everyday Capture & Revision Features
+---------------------------------------
+- Highlight-to-Save: Select any word, idiom, or phrasal verb on any webpage
+  and click the floating "Save to Vocab List" button.
+- Right-Click & Shortcut: Right-click selected text -> "Save to IPMAT/CUET VOCAB BUILDER",
+  or press Alt+Shift+V (Option+Shift+V on Mac) — works even on embedded PDFs.
+- In-Page Word Highlighter: Optionally underlines saved New and Learning words
+  while you read articles, with hover-to-peek meaning tooltips.
+- THE VOCAB VAULT Dashboard: Filter by category or mastery level, unlock
+  Mastery Badges (Novice -> Master Learner), practice with Flashcards & MCQs,
+  listen to Audio Pronunciation, download A4 Printable PDF Study Sheets, and
+  export Anki-ready (.tsv), CSV, or JSON backups.
+
+5. Optional: Two-Way Google Sheets Sync (3 Tabs)
 ------------------------------------------------
-Every time you fetch a meaning from Gemini, the extension can automatically
-append [Word/Expression, Meaning, Example Sentence] into three tabs in your
-Google Sheet: "Words", "Idioms", and "Phrasal Verbs".
+Every saved entry can auto-append [Word/Expression, Meaning, Example Sentence]
+into three tabs in your Google Sheet: "Words", "Idioms", and "Phrasal Verbs",
+and you can click "Pull from Sheet" in the dashboard to sync edits back down.
 
-1. Open a Google Sheet (or visit https://sheets.new).
+1. Open Google Sheets (https://docs.google.com/spreadsheets) and import the
+   3-tab starter template from the web app (or open any blank sheet).
 2. Click Extensions -> Apps Script.
 3. Open the extension's Settings page, click "Copy Apps Script", paste it into
    Apps Script, and save.
-4. Click Deploy -> New deployment -> Web app -> set access to "Anyone" -> Deploy.
+4. Click Deploy -> New deployment -> Web app -> set Execute as "Me" and Who has
+   access to "Anyone" -> Deploy & Authorise access.
 5. Copy the /exec Web App URL, paste it into "Google Sheets Auto-Save URL" in
    Settings, click "Save Settings", and click "Test Google Sheet".
 
-5. Important Backup Reminder
+6. Important Backup Reminder
 ----------------------------
-All entries are stored locally in Brave (chrome.storage.local). Uninstalling
-the extension may remove your locally stored data. Periodically open
-"My CUET Library" -> "Backup & Export" -> "Export JSON Backup" to keep a safe
+All entries are stored locally in your browser (chrome.storage.local).
+Uninstalling the extension may remove locally stored data. Periodically open
+"THE VOCAB VAULT" -> "Backup & Export" -> "Export JSON Backup" to keep a safe
 copy. Exported backups never include your Gemini API key or Sheet URL.

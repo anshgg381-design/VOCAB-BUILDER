@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Settings — CUET Vocabulary Builder</title>
+  <title>Settings — IPMAT/CUET VOCAB BUILDER</title>
   <link rel="stylesheet" href="settings.css" />
 </head>
 <body>
@@ -11,9 +11,9 @@
     <header class="top-bar">
       <div>
         <h1 class="page-title">Settings</h1>
-        <p class="page-subtitle">Configure your personal Gemini API key and model for CUET Vocabulary Builder.</p>
+        <p class="page-subtitle">Configure your personal Gemini API key (powered by Gemini 3.1 Flash Lite) for IPMAT/CUET VOCAB BUILDER.</p>
       </div>
-      <a href="dashboard.html" class="nav-link">Open My CUET Library</a>
+      <a href="dashboard.html" class="nav-link">Open THE VOCAB VAULT</a>
     </header>
 
     <main class="content">
@@ -35,27 +35,19 @@
               <button type="button" id="btn-toggle-key" class="secondary-btn">Show</button>
             </div>
             <p class="field-help">
-              Stored locally in Brave via <code>chrome.storage.local</code>. Requests are made only from the background service worker.
+              Stored locally in your browser via <code>chrome.storage.local</code>. Requests are made only from the background service worker.
             </p>
           </div>
 
           <div class="field">
-            <label for="model-select" class="field-label">Gemini Model</label>
-            <select id="model-select" class="select-input"></select>
-          </div>
-
-          <div class="field">
-            <label for="custom-model-input" class="field-label">
-              Custom Model ID <span class="optional-note">(optional — overrides dropdown if filled)</span>
-            </label>
-            <input
-              type="text"
-              id="custom-model-input"
-              class="text-input"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="Leave blank to use selected model above"
-            />
+            <span class="field-label">Gemini Model</span>
+            <div id="fixed-model-display" class="locked-model-box">
+              <span class="locked-model-name">Gemini 3.1 Flash Lite</span>
+              <code class="locked-model-id">gemini-3.1-flash-lite</code>
+            </div>
+            <p class="field-help">
+              The extension runs exclusively on Gemini 3.1 Flash Lite for fast, low-latency vocabulary analysis.
+            </p>
           </div>
 
           <div class="field">
@@ -75,6 +67,31 @@
             </p>
           </div>
 
+          <div class="field">
+            <label for="daily-goal-input" class="field-label">Daily Study Goal (words per day)</label>
+            <input
+              type="number"
+              id="daily-goal-input"
+              class="text-input"
+              min="1"
+              max="50"
+              value="5"
+            />
+            <p class="field-help">
+              Tracks your daily saved streak and updates the extension toolbar badge automatically.
+            </p>
+          </div>
+
+          <div class="field">
+            <span class="field-label">Passive Revision</span>
+            <label class="toggle-row" for="highlighter-toggle">
+              <input type="checkbox" id="highlighter-toggle" checked />
+              <span>
+                <strong>In-Page Word Highlighter</strong> — Underline saved <em>New</em> and <em>Learning</em> words while reading articles, with hover-to-peek meanings.
+              </span>
+            </label>
+          </div>
+
           <div class="form-actions">
             <button type="submit" id="btn-save-settings" class="primary-btn">Save Settings</button>
             <button type="button" id="btn-test-connection" class="secondary-btn">Test Gemini Connection</button>
@@ -85,13 +102,22 @@
         </form>
       </section>
 
+      <section class="panel" aria-labelledby="capture-shortcuts-heading">
+        <h2 id="capture-shortcuts-heading" class="section-title">Quick Capture Shortcuts &amp; Context Menu</h2>
+        <ul class="notes-list">
+          <li><strong>Right-Click Menu:</strong> Highlight text on any webpage or embedded PDF, right-click, and choose <strong>Save to IPMAT/CUET VOCAB BUILDER</strong>.</li>
+          <li><strong>Keyboard Shortcut:</strong> Select any word or phrase and press <code>Alt + Shift + V</code> (<code>Option + Shift + V</code> on Mac) or <code>Alt + Shift + S</code> to open the Save card instantly.</li>
+          <li><strong>Customize Shortcut:</strong> Open your browser&apos;s Extensions Shortcuts page (e.g. <code>chrome://extensions/shortcuts</code>) anytime to rebind it.</li>
+        </ul>
+      </section>
+
       <section class="panel" aria-labelledby="sheets-guide-heading">
         <div class="section-head-row">
           <h2 id="sheets-guide-heading" class="section-title">Auto-Save to Google Sheets (60-Second Setup)</h2>
           <button type="button" id="btn-copy-script" class="secondary-btn btn-sm">Copy Apps Script</button>
         </div>
         <ol class="steps-list">
-          <li>Open a new Google Sheet at <strong>sheets.new</strong> (or open the CUET Google Sheet you created in the web app).</li>
+          <li>Open a new Google Sheet at <strong>sheets.new</strong> (or import the 3-tab starter template from the web app).</li>
           <li>In the top menu, click <strong>Extensions &rarr; Apps Script</strong>.</li>
           <li>Delete any starter text in the editor, paste the script below, and press <strong>Ctrl+S</strong> (or Cmd+S) to save.</li>
           <li>Click <strong>Deploy &rarr; New deployment</strong>, choose <strong>Web app</strong>, set <strong>Who has access</strong> to <strong>Anyone</strong>, and click <strong>Deploy</strong>.</li>
@@ -115,7 +141,7 @@
         <ul class="notes-list">
           <li>Your API key and Google Sheets URL are never hardcoded in source files, never exposed to website scripts, and never included in exported JSON or CSV backups.</li>
           <li>Because this extension has no backend server and stores settings locally in your browser profile, a locally stored API key is not completely protected against someone who has direct access to your computer or extension files. Use this extension for your personal study only.</li>
-          <li>All vocabulary, idioms, and phrasal verbs are stored locally in Brave. Uninstalling the extension may remove your locally stored data, so export a JSON backup from your CUET Library periodically.</li>
+          <li>All vocabulary, idioms, and phrasal verbs are stored locally in your browser. Uninstalling the extension may remove your locally stored data, so export a JSON backup from THE VOCAB VAULT periodically.</li>
         </ul>
       </section>
     </main>
