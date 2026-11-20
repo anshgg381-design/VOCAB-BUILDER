@@ -1226,8 +1226,9 @@ test('extension manifest & Apps Script include contextMenus, Alt+Shift+V shortcu
   assert.match(BRAVE_APPS_SCRIPT_CODE, /readAllCuetRows/);
 
   const settingsJs = fs.readFileSync(path.resolve('extension/settings.js'), 'utf8');
-  assert.match(settingsJs, /pullAll/);
+  assert.match(settingsJs, /APPS_SCRIPT_TEMPLATE/);
   assert.match(settingsJs, /inPageHighlighter/);
+  assert.match(shared.APPS_SCRIPT_TEMPLATE, /pullAll/);
 });
 
 test('getMasteryBadgeProgress unlocks Novice, Vocabulary Scholar, and Master Learner across web and extension', () => {
@@ -1723,5 +1724,125 @@ test('buildPdfStudySheetPlan supports customLabel for bulk-selected subsets', ()
   assert.equal(plan.totalCount, 2);
   assert.match(plan.subtitle, /Selected Subset \(2 entries\)/);
 });
+
+test('extension shared.js mirrors website parity helpers (Exam Countdown, Mistake Tracker, Sources, Sheets CSV/URL, Selected PDF)', () => {
+  const now = new Date('2026-11-20T12:00:00.000Z');
+  const entries: VocabEntry[] = [
+    {
+      id: 'ext-1',
+      expression: 'aberration',
+      category: 'vocabulary',
+      meaning: 'A departure from what is normal.',
+      example: 'The cold spell was an aberration.',
+      contextSentence: '',
+      sourceTitle: 'Aeon',
+      sourceUrl: '',
+      dateAdded: '2026-11-18T10:00:00.000Z',
+      learned: false,
+      masteryLevel: 'new',
+      favourite: false,
+    },
+    {
+      id: 'ext-2',
+      expression: 'put off',
+      category: 'phrasalVerbs',
+      meaning: 'To delay or postpone.',
+      example: 'Never put off daily revision.',
+      contextSentence: '',
+      sourceTitle: 'The Hindu',
+      sourceUrl: '',
+      dateAdded: '2026-11-19T10:00:00.000Z',
+      learned: false,
+      masteryLevel: 'learning',
+      favourite: false,
+    },
+    {
+      id: 'ext-3',
+      expression: 'break the ice',
+      category: 'idioms',
+      meaning: 'To make people feel relaxed.',
+      example: 'A warm greeting broke the ice.',
+      contextSentence: '',
+      sourceTitle: 'Aeon',
+      sourceUrl: '',
+      dateAdded: '2026-11-19T11:00:00.000Z',
+      learned: true,
+      masteryLevel: 'mastered',
+      favourite: true,
+    },
+  ];
+
+  // Exam Countdown parity
+  const examConfig = { examName: 'CUET UG', examDate: '2026-12-01' };
+  const webCountdown = computeExamCountdown(examConfig, entries, now);
+  const extCountdown = shared.computeExamCountdown(examConfig, entries, now);
+  assert.ok(extCountdown);
+  assert.deepEqual(extCountdown, webCountdown);
+  if (extCountdown) {
+    assert.equal(extCountdown.daysRemaining, 11);
+    assert.equal(extCountdown.remainingQueue, 2);
+  }
+
+  // Mistake Tracker + sanitizeEntry round-trip
+  const missPatch = shared.recordEntryMissPatch(entries[0], now);
+  assert.equal(missPatch.missCount, 1);
+  assert.equal(missPatch.masteryLevel, 'learning');
+  assert.equal(missPatch.reviewIntervalDays, 1);
+
+  const missed = { ...entries[0], ...missPatch };
+  assert.equal(shared.getMissCount(missed), 1);
+  assert.equal(shared.isNeedsPractice(missed), true);
+
+  const sanitized = shared.sanitizeEntry(missed);
+  assert.equal(sanitized.missCount, 1);
+  assert.equal(sanitized.lastMissedAt, now.toISOString());
+
+  // Unique sources parity
+  assert.deepEqual(shared.getUniqueSources(entries), getUniqueSources(entries));
+
+  // Google Sheets CSV & Apps Script validation parity
+  assert.equal(shared.buildTemplateCsv('vocabulary', [], false), buildTemplateCsv('vocabulary', [], false));
+  assert.equal(shared.buildTemplateCsv('idioms', [], false), buildTemplateCsv('idioms', [], false));
+  assert.equal(shared.buildTemplateCsv('phrasalVerbs', [], false), buildTemplateCsv('phrasalVerbs', [], false));
+  assert.equal(shared.isValidAppsScriptUrl('https://script.google.com/macros/s/AKfycbz123/exec'), true);
+  assert.equal(shared.validateAppsScriptUrlInput('https://script.google.com/u/0/edit').ok, false);
+  assert.match(shared.APPS_SCRIPT_TEMPLATE, /syncBatch/);
+  assert.match(shared.APPS_SCRIPT_TEMPLATE, /pullAll/);
+
+  // Selected subset PDF plan parity
+  const extPdfPlan = shared.buildPdfStudySheetPlan(entries.slice(0, 2), {
+    category: 'all',
+    sortOrder: 'az',
+    customLabel: 'Selected Subset (2 entries)',
+    now,
+  });
+  assert.equal(extPdfPlan.filename, 'ipmat-cuet-study-sheet-selected-2026-11-20.pdf');
+  assert.equal(extPdfPlan.totalCount, 2);
+});
+
+test('extension UI files use Add to Vocab Vault branding, Nesoi dark mode, and built-in Google Sheets guide', () => {
+  const extDir = path.resolve('extension');
+  const contentJs = fs.readFileSync(path.join(extDir, 'content.js'), 'utf8');
+  const backgroundJs = fs.readFileSync(path.join(extDir, 'background.js'), 'utf8');
+  const dashboardHtml = fs.readFileSync(path.join(extDir, 'dashboard.html'), 'utf8');
+  const dashboardCss = fs.readFileSync(path.join(extDir, 'dashboard.css'), 'utf8');
+  const popupHtml = fs.readFileSync(path.join(extDir, 'popup.html'), 'utf8');
+  const settingsHtml = fs.readFileSync(path.join(extDir, 'settings.html'), 'utf8');
+
+  assert.equal(contentJs.includes('Add to Vocab Vault'), true);
+  assert.equal(contentJs.includes('Save to CUET List'), false);
+  assert.equal(backgroundJs.includes("title: 'Add to Vocab Vault'"), true);
+  assert.equal(popupHtml.includes('Add to Vocab Vault'), true);
+  assert.equal(settingsHtml.includes('Add to Vocab Vault'), true);
+
+  // Google Sheets guide & dark mode toggle present inside THE VOCAB VAULT dashboard
+  assert.equal(dashboardHtml.includes('id="sheets-guide-panel"'), true);
+  assert.equal(dashboardHtml.includes('id="btn-theme-toggle"'), true);
+  assert.equal(dashboardHtml.includes('id="exam-card"'), true);
+  assert.equal(dashboardHtml.includes('id="bulk-bar"'), true);
+  assert.equal(dashboardHtml.includes('id="btn-toast-undo"'), true);
+  assert.equal(dashboardCss.includes('html.dark'), true);
+});
+
 
 

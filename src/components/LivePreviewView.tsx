@@ -563,7 +563,7 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
             </div>
           </div>
 
-          {/* Floating "Save to Vocab List" Button & Confirmation Panel */}
+          {/* Floating "Add to Vocab Vault" Button & Confirmation Panel */}
           {panelMode !== 'hidden' && selection && (
             <div
               ref={floatRef}
@@ -577,12 +577,12 @@ export const LivePreviewView: React.FC<LivePreviewViewProps> = ({
                   onClick={() => setPanelMode('confirm')}
                   className="px-4 py-2 bg-[#002962] dark:bg-[#2563EB] text-white text-[13px] font-semibold rounded-md shadow-lg hover:bg-[#001F4D] dark:hover:bg-[#1D4ED8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#002962] whitespace-nowrap cursor-pointer"
                 >
-                  Save to Vocab List
+                  Add to Vocab Vault
                 </button>
               ) : (
                 <div
                   role="dialog"
-                  aria-label="Save to Vocab List confirmation"
+                  aria-label="Add to Vocab Vault confirmation"
                   className="w-[310px] max-w-[calc(100vw-48px)] bg-white dark:bg-[#111C30] border border-[#002962]/20 dark:border-[#93C5FD]/25 rounded-xl shadow-xl p-4 text-[#002962] dark:text-[#E8EEF7]"
                 >
                   <div className="flex items-start justify-between gap-2 mb-3">

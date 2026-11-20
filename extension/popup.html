@@ -9,13 +9,34 @@
 <body>
   <div class="popup-shell">
     <header class="popup-header">
-      <h1 class="popup-title">IPMAT/CUET VOCAB BUILDER</h1>
-      <button type="button" id="btn-settings" class="text-btn">Settings</button>
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">V</span>
+        <div class="brand-text">
+          <h1 class="popup-title">IPMAT/CUET VOCAB BUILDER</h1>
+          <span id="popup-streak-meta" class="popup-meta">0/5 today</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button
+          type="button"
+          id="btn-theme-toggle"
+          class="icon-btn"
+          title="Switch to Night Study Dark Mode"
+          aria-label="Toggle dark mode"
+        >
+          <span id="theme-icon" aria-hidden="true">☾</span>
+        </button>
+        <button type="button" id="btn-settings" class="text-btn">Settings</button>
+      </div>
     </header>
 
     <div id="api-key-notice" class="notice-banner" hidden>
       <span>Add your Gemini API key in Settings to analyse new entries.</span>
       <button type="button" id="btn-notice-settings" class="notice-link">Open Settings</button>
+    </div>
+
+    <div id="popup-exam-strip" class="exam-strip" hidden>
+      <span id="popup-exam-text" class="exam-strip-text"></span>
     </div>
 
     <main class="popup-main">
@@ -41,7 +62,7 @@
             </select>
           </div>
           <button type="submit" id="btn-save" class="primary-btn">
-            Save and Analyse
+            Add to Vocab Vault
           </button>
         </div>
       </form>
@@ -69,7 +90,10 @@
       </section>
 
       <section class="recent-section" aria-label="Recently saved entries">
-        <h2 class="section-heading">Recently Saved</h2>
+        <div class="section-head">
+          <h2 class="section-heading">Recently Saved</h2>
+          <span id="popup-due-badge" class="due-badge" hidden>0 due</span>
+        </div>
         <div id="recent-list" class="recent-list">
           <p class="empty-note">No entries saved yet. Highlight text on any webpage or add one above.</p>
         </div>

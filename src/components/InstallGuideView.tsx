@@ -514,7 +514,7 @@ export const InstallGuideView: React.FC = () => {
           </h3>
           <ul className="list-disc pl-5 space-y-2 text-[14px] text-[#1A3459] dark:text-[#CBD5E1] leading-relaxed">
             <li>
-              <strong>Highlight, right-click, or shortcut save:</strong> Open any article or PDF, highlight a word, and click <strong>Save to Vocab List</strong>, right-click <strong>Save to IPMAT/CUET VOCAB BUILDER</strong>, or press{' '}
+              <strong>Highlight, right-click, or shortcut save:</strong> Open any article or PDF, highlight a word, and click <strong>Add to Vocab Vault</strong>, right-click <strong>Add to Vocab Vault</strong>, or press{' '}
               <code className="text-xs bg-[#F5F3F0] dark:bg-[#0D1626] border border-[#002962]/15 dark:border-[#93C5FD]/20 px-1 py-0.5 rounded text-[#002962] dark:text-[#DCE8FA]">
                 {isWin ? 'Alt + Shift + V' : 'Option + Shift + V'}
               </code>

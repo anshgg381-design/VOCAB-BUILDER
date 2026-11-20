@@ -54,6 +54,8 @@
     sheetWebhookUrl: '',
     dailyGoalTarget: DEFAULT_DAILY_GOAL,
     inPageHighlighter: true,
+    themeMode: 'light',
+    examConfig: null,
   };
 
   const PHRASAL_PARTICLES = new Set([
@@ -1038,6 +1040,12 @@
       ...(typeof raw.reviewCount === 'number' && raw.reviewCount >= 0
         ? { reviewCount: Math.floor(raw.reviewCount) }
         : {}),
+      ...(typeof raw.missCount === 'number' && raw.missCount > 0
+        ? { missCount: Math.floor(raw.missCount) }
+        : {}),
+      ...(typeof raw.lastMissedAt === 'string' && !Number.isNaN(Date.parse(raw.lastMissedAt))
+        ? { lastMissedAt: raw.lastMissedAt }
+        : {}),
     };
   }
 
@@ -1522,8 +1530,9 @@
 
     const dateStamp = now.toISOString().slice(0, 10);
     const generatedDateLabel = formatDate(now.toISOString()) || dateStamp;
-    const categoryLabel = labels[categoryFilter];
-    const slug = slugs[categoryFilter];
+    const customLabel = typeof opts.customLabel === 'string' && opts.customLabel.trim() ? opts.customLabel.trim() : '';
+    const categoryLabel = customLabel || labels[categoryFilter];
+    const slug = customLabel ? 'selected' : slugs[categoryFilter];
 
     const rows = filtered.map((entry, idx) => ({
       index: idx + 1,
@@ -1758,6 +1767,294 @@
     };
   }
 
+  function getMissCount(entry) {
+    if (!entry) return 0;
+    return typeof entry.missCount === 'number' && Number.isFinite(entry.missCount) && entry.missCount > 0
+      ? Math.floor(entry.missCount)
+      : 0;
+  }
+
+  function isNeedsPractice(entry) {
+    return getMissCount(entry) > 0;
+  }
+
+  function recordEntryMissPatch(entry, now) {
+    const safeNow = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+    const nextMissCount = getMissCount(entry) + 1;
+    return {
+      missCount: nextMissCount,
+      lastMissedAt: safeNow.toISOString(),
+      masteryLevel: 'learning',
+      learned: false,
+      lastReviewedAt: safeNow.toISOString(),
+      reviewIntervalDays: 1,
+      nextReviewAt: new Date(safeNow.getTime() + DAY_MS).toISOString(),
+    };
+  }
+
+  function getUniqueSources(entries) {
+    const counts = new Map();
+    for (const entry of entries || []) {
+      const title = String(entry && entry.sourceTitle ? entry.sourceTitle : '').trim();
+      if (!title) continue;
+      counts.set(title, (counts.get(title) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([title, count]) => ({ title, count }))
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+      });
+  }
+
+  function computeExamCountdown(config, entries, now) {
+    if (!config || !config.examDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(config.examDate).trim())) {
+      return null;
+    }
+    const examName = String(config.examName || 'CUET').trim() || 'CUET';
+    const parts = String(config.examDate).trim().split('-').map(Number);
+    const targetMidnight = new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0);
+    if (Number.isNaN(targetMidnight.getTime())) return null;
+
+    const safeNow = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+    const todayMidnight = new Date(
+      safeNow.getFullYear(),
+      safeNow.getMonth(),
+      safeNow.getDate(),
+      0,
+      0,
+      0,
+      0
+    );
+
+    const daysRemaining = Math.round((targetMidnight.getTime() - todayMidnight.getTime()) / DAY_MS);
+    const stats = getMasteryStats(entries || []);
+    const remainingQueue = Math.max(0, stats.total - stats.masteredCount);
+
+    const status = daysRemaining > 0 ? 'upcoming' : daysRemaining === 0 ? 'today' : 'past';
+    const dailyPaceNeeded =
+      remainingQueue === 0
+        ? 0
+        : daysRemaining > 0
+          ? Math.ceil(remainingQueue / daysRemaining)
+          : remainingQueue;
+
+    let summaryText;
+    if (status === 'today') {
+      summaryText =
+        remainingQueue > 0
+          ? `${examName} is today · Final quick revision of ${remainingQueue} ${remainingQueue === 1 ? 'word' : 'words'}`
+          : `${examName} is today · All ${stats.total} saved words mastered!`;
+    } else if (status === 'past') {
+      const daysAgo = Math.abs(daysRemaining);
+      summaryText = `${examName} date passed ${daysAgo} ${daysAgo === 1 ? 'day' : 'days'} ago · Update your next exam date`;
+    } else if (remainingQueue === 0) {
+      summaryText = `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} to ${examName} · All ${stats.total} saved words mastered!`;
+    } else {
+      summaryText = `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} to ${examName} · Master ${dailyPaceNeeded} ${
+        dailyPaceNeeded === 1 ? 'word' : 'words'
+      }/day to finish your ${remainingQueue}-word queue`;
+    }
+
+    return {
+      examName,
+      examDate: String(config.examDate).trim(),
+      daysRemaining,
+      remainingQueue,
+      masteredCount: stats.masteredCount,
+      totalEntries: stats.total,
+      dailyPaceNeeded,
+      status,
+      summaryText,
+    };
+  }
+
+  function buildTemplateCsv(category, entries, includeEntries) {
+    const headerFirst =
+      category === 'idioms'
+        ? 'Idiom'
+        : category === 'phrasalVerbs'
+          ? 'Phrasal Verb'
+          : 'Word';
+    const lines = [[headerFirst, 'Meaning', 'Example Sentence'].map(escapeCsvCell).join(',')];
+    if (includeEntries && Array.isArray(entries)) {
+      const subset = entries.filter((e) => e.category === category);
+      for (const entry of subset) {
+        lines.push(
+          [entry.expression || '', entry.meaning || '', entry.example || '']
+            .map(escapeCsvCell)
+            .join(',')
+        );
+      }
+    }
+    return lines.join('\r\n');
+  }
+
+  function isValidAppsScriptUrl(url) {
+    return /^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec(?:\?.*)?$/i.test(
+      String(url || '').trim()
+    );
+  }
+
+  function validateAppsScriptUrlInput(rawUrl) {
+    const trimmed = String(rawUrl || '').trim();
+    if (!trimmed) {
+      return { ok: false, error: 'Paste your Apps Script Web App URL (ending in /exec) first.' };
+    }
+    if (/\/edit\b/i.test(trimmed) || /script\.google\.com\/(?:u\/\d+\/)?home\/projects\//i.test(trimmed)) {
+      return {
+        ok: false,
+        error: 'That looks like the Apps Script editor (/edit) URL. Click Deploy -> New deployment -> Web app and copy the URL ending in /exec.',
+      };
+    }
+    if (!isValidAppsScriptUrl(trimmed)) {
+      return {
+        ok: false,
+        error: 'Invalid URL. It must start with https://script.google.com/macros/s/... and end with /exec.',
+      };
+    }
+    return { ok: true, url: trimmed };
+  }
+
+  const APPS_SCRIPT_TEMPLATE = `function readAllCuetRows(ss) {
+  var tabMap = [
+    { category: 'vocabulary', name: 'Words' },
+    { category: 'idioms', name: 'Idioms' },
+    { category: 'phrasalVerbs', name: 'Phrasal Verbs' }
+  ];
+  var rows = [];
+  for (var c = 0; c < tabMap.length; c++) {
+    var cfg = tabMap[c];
+    var sheet = ss.getSheetByName(cfg.name);
+    if (!sheet) continue;
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) continue;
+    var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    for (var i = 0; i < values.length; i++) {
+      var expr = String(values[i][0] || '').trim();
+      var meaning = String(values[i][1] || '').trim();
+      var example = String(values[i][2] || '').trim();
+      if (expr && meaning) {
+        rows.push({
+          category: cfg.category,
+          expression: expr,
+          meaning: meaning,
+          example: example
+        });
+      }
+    }
+  }
+  return rows;
+}
+
+function doGet(e) {
+  var action = e && e.parameter ? e.parameter.action : '';
+  if (action === 'pull') {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: true, rows: readAllCuetRows(ss) }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify({ ok: true, supportsPull: true, status: 'IPMAT/CUET Vocab Sheet webhook is active.' }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function getOrCreateCuetTab(ss, category) {
+  var tabMap = {
+    vocabulary: { name: 'Words', header: 'Word' },
+    idioms: { name: 'Idioms', header: 'Idiom' },
+    phrasalVerbs: { name: 'Phrasal Verbs', header: 'Phrasal Verb' }
+  };
+  var cfg = tabMap[category] || tabMap.vocabulary;
+  var sheet = ss.getSheetByName(cfg.name);
+  if (!sheet) {
+    sheet = ss.insertSheet(cfg.name);
+  }
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([cfg.header, 'Meaning', 'Example Sentence']);
+    sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+  return { sheet: sheet, name: cfg.name };
+}
+
+function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    if (data.action === 'pullAll') {
+      return ContentService
+        .createTextOutput(JSON.stringify({ ok: true, rows: readAllCuetRows(ss) }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === 'syncBatch' && Array.isArray(data.rows)) {
+      var grouped = { vocabulary: [], idioms: [], phrasalVerbs: [] };
+      for (var i = 0; i < data.rows.length; i++) {
+        var r = data.rows[i] || {};
+        var cat = grouped[r.category] ? r.category : 'vocabulary';
+        var expr = String(r.expression || '').trim();
+        if (expr) {
+          grouped[cat].push([expr, String(r.meaning || '').trim(), String(r.example || '').trim()]);
+        }
+      }
+      var addedCount = 0;
+      var skippedCount = 0;
+      var cats = ['vocabulary', 'idioms', 'phrasalVerbs'];
+      for (var c = 0; c < cats.length; c++) {
+        var items = grouped[cats[c]];
+        if (!items.length) continue;
+        var target = getOrCreateCuetTab(ss, cats[c]).sheet;
+        var lastRow = target.getLastRow();
+        var existing = {};
+        if (lastRow > 1) {
+          var colA = target.getRange(2, 1, lastRow - 1, 1).getValues();
+          for (var k = 0; k < colA.length; k++) {
+            var key = String(colA[k][0] || '').trim().toLowerCase();
+            if (key) existing[key] = true;
+          }
+        }
+        var toInsert = [];
+        for (var j = 0; j < items.length; j++) {
+          var norm = items[j][0].toLowerCase();
+          if (existing[norm]) {
+            skippedCount++;
+          } else {
+            existing[norm] = true;
+            toInsert.push(items[j]);
+          }
+        }
+        if (toInsert.length) {
+          target.getRange(lastRow + 1, 1, toInsert.length, 3).setValues(toInsert);
+          addedCount += toInsert.length;
+        }
+      }
+      return ContentService
+        .createTextOutput(JSON.stringify({ ok: true, addedCount: addedCount, skippedCount: skippedCount }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var res = getOrCreateCuetTab(ss, data.category);
+    if (!data.testOnly) {
+      res.sheet.appendRow([
+        String(data.expression || '').trim(),
+        String(data.meaning || '').trim(),
+        String(data.example || '').trim()
+      ]);
+    }
+
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: true, tabName: res.name }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: false, error: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+
   return {
     CATEGORIES,
     CATEGORY_SINGULAR,
@@ -1774,6 +2071,7 @@
     GEMINI_MODEL,
     GEMINI_MODELS,
     DEFAULT_SETTINGS,
+    APPS_SCRIPT_TEMPLATE,
     normalizeExpression,
     normalizeKey,
     detectCategory,
@@ -1799,6 +2097,11 @@
     getLocalDateKey,
     clampDailyGoal,
     computeDailyGoalStats,
+    getMissCount,
+    isNeedsPractice,
+    recordEntryMissPatch,
+    getUniqueSources,
+    computeExamCountdown,
     formatEntryCopyText,
     getToolbarBadgeText,
     buildGeminiPrompt,
@@ -1808,6 +2111,9 @@
     validateAndMergeImport,
     escapeCsvCell,
     buildCsv,
+    buildTemplateCsv,
+    isValidAppsScriptUrl,
+    validateAppsScriptUrlInput,
     buildAnkiTsv,
     mergePulledSheetEntries,
     getHighlightableEntries,

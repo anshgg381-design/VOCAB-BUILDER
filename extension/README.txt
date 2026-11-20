@@ -38,15 +38,17 @@ Supported Browsers (Windows & macOS):
 4. Everyday Capture & Revision Features
 ---------------------------------------
 - Highlight-to-Save: Select any word, idiom, or phrasal verb on any webpage
-  and click the floating "Save to Vocab List" button.
-- Right-Click & Shortcut: Right-click selected text -> "Save to IPMAT/CUET VOCAB BUILDER",
+  and click the floating "Add to Vocab Vault" button.
+- Right-Click & Shortcut: Right-click selected text -> "Add to Vocab Vault",
   or press Alt+Shift+V (Option+Shift+V on Mac) — works even on embedded PDFs.
 - In-Page Word Highlighter: Optionally underlines saved New and Learning words
   while you read articles, with hover-to-peek meaning tooltips.
-- THE VOCAB VAULT Dashboard: Filter by category or mastery level, unlock
-  Mastery Badges (Novice -> Master Learner), practice with Flashcards & MCQs,
-  listen to Audio Pronunciation, download A4 Printable PDF Study Sheets, and
-  export Anki-ready (.tsv), CSV, or JSON backups.
+- THE VOCAB VAULT Dashboard: Filter by category, mastery level, source, Due
+  Today (SRS), or Needs Practice; track your Exam Countdown & daily pace;
+  toggle Night Study Dark Mode; use Bulk Multi-Select Actions & 5s Undo on
+  delete; unlock Mastery Badges; practice with 3D Flip Flashcards & MCQs;
+  connect Google Sheets directly with built-in Setup Guide; download A4 PDF
+  Study Sheets; and export Anki (.tsv), CSV, or JSON backups.
 
 5. Optional: Two-Way Google Sheets Sync (3 Tabs)
 ------------------------------------------------

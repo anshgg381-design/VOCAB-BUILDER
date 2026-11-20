@@ -1,4 +1,4 @@
-/* CUET Vocabulary Builder — Settings Page Logic */
+/* IPMAT/CUET VOCAB BUILDER — Settings Page Logic */
 (function () {
   'use strict';
 
@@ -14,148 +14,23 @@
   const copyScriptBtn = document.getElementById('btn-copy-script');
   const scriptCodeEl = document.getElementById('apps-script-code');
   const feedbackBox = document.getElementById('feedback-box');
+  const themeToggleBtn = document.getElementById('btn-theme-toggle');
 
-  const APPS_SCRIPT_TEMPLATE = `function readAllCuetRows(ss) {
-  var tabMap = [
-    { category: 'vocabulary', name: 'Words' },
-    { category: 'idioms', name: 'Idioms' },
-    { category: 'phrasalVerbs', name: 'Phrasal Verbs' }
-  ];
-  var rows = [];
-  for (var c = 0; c < tabMap.length; c++) {
-    var cfg = tabMap[c];
-    var sheet = ss.getSheetByName(cfg.name);
-    if (!sheet) continue;
-    var lastRow = sheet.getLastRow();
-    if (lastRow <= 1) continue;
-    var values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
-    for (var i = 0; i < values.length; i++) {
-      var expr = String(values[i][0] || '').trim();
-      var meaning = String(values[i][1] || '').trim();
-      var example = String(values[i][2] || '').trim();
-      if (expr && meaning) {
-        rows.push({
-          category: cfg.category,
-          expression: expr,
-          meaning: meaning,
-          example: example
-        });
-      }
-    }
-  }
-  return rows;
-}
-
-function doGet(e) {
-  var action = e && e.parameter ? e.parameter.action : '';
-  if (action === 'pull') {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, rows: readAllCuetRows(ss) }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-  return ContentService
-    .createTextOutput(JSON.stringify({ ok: true, supportsPull: true, status: 'CUET Vocabulary Sheet webhook is active.' }))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-function getOrCreateCuetTab(ss, category) {
-  var tabMap = {
-    vocabulary: { name: 'Words', header: 'Word' },
-    idioms: { name: 'Idioms', header: 'Idiom' },
-    phrasalVerbs: { name: 'Phrasal Verbs', header: 'Phrasal Verb' }
-  };
-  var cfg = tabMap[category] || tabMap.vocabulary;
-  var sheet = ss.getSheetByName(cfg.name);
-  if (!sheet) {
-    sheet = ss.insertSheet(cfg.name);
-  }
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow([cfg.header, 'Meaning', 'Example Sentence']);
-    sheet.getRange(1, 1, 1, 3).setFontWeight('bold');
-    sheet.setFrozenRows(1);
-  }
-  return { sheet: sheet, name: cfg.name };
-}
-
-function doPost(e) {
-  try {
-    var data = JSON.parse(e.postData.contents);
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-    if (data.action === 'pullAll') {
-      return ContentService
-        .createTextOutput(JSON.stringify({ ok: true, rows: readAllCuetRows(ss) }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    if (data.action === 'syncBatch' && Array.isArray(data.rows)) {
-      var grouped = { vocabulary: [], idioms: [], phrasalVerbs: [] };
-      for (var i = 0; i < data.rows.length; i++) {
-        var r = data.rows[i] || {};
-        var cat = grouped[r.category] ? r.category : 'vocabulary';
-        var expr = String(r.expression || '').trim();
-        if (expr) {
-          grouped[cat].push([expr, String(r.meaning || '').trim(), String(r.example || '').trim()]);
-        }
-      }
-      var addedCount = 0;
-      var skippedCount = 0;
-      var cats = ['vocabulary', 'idioms', 'phrasalVerbs'];
-      for (var c = 0; c < cats.length; c++) {
-        var items = grouped[cats[c]];
-        if (!items.length) continue;
-        var target = getOrCreateCuetTab(ss, cats[c]).sheet;
-        var lastRow = target.getLastRow();
-        var existing = {};
-        if (lastRow > 1) {
-          var colA = target.getRange(2, 1, lastRow - 1, 1).getValues();
-          for (var k = 0; k < colA.length; k++) {
-            var key = String(colA[k][0] || '').trim().toLowerCase();
-            if (key) existing[key] = true;
-          }
-        }
-        var toInsert = [];
-        for (var j = 0; j < items.length; j++) {
-          var norm = items[j][0].toLowerCase();
-          if (existing[norm]) {
-            skippedCount++;
-          } else {
-            existing[norm] = true;
-            toInsert.push(items[j]);
-          }
-        }
-        if (toInsert.length) {
-          target.getRange(lastRow + 1, 1, toInsert.length, 3).setValues(toInsert);
-          addedCount += toInsert.length;
-        }
-      }
-      return ContentService
-        .createTextOutput(JSON.stringify({ ok: true, addedCount: addedCount, skippedCount: skippedCount }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    var res = getOrCreateCuetTab(ss, data.category);
-    if (!data.testOnly) {
-      res.sheet.appendRow([
-        String(data.expression || '').trim(),
-        String(data.meaning || '').trim(),
-        String(data.example || '').trim()
-      ]);
-    }
-
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, tabName: res.name }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: false, error: err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
+  const APPS_SCRIPT_TEMPLATE = CUETShared.APPS_SCRIPT_TEMPLATE;
+  let currentTheme = 'light';
 
   if (scriptCodeEl) {
     scriptCodeEl.textContent = APPS_SCRIPT_TEMPLATE;
+  }
+
+  function applyTheme(mode) {
+    currentTheme = mode === 'dark' ? 'dark' : 'light';
+    document.documentElement.classList.toggle('dark', currentTheme === 'dark');
+    if (themeToggleBtn) {
+      themeToggleBtn.textContent = currentTheme === 'dark' ? '☀ Light Mode' : '☾ Night Mode';
+      themeToggleBtn.title =
+        currentTheme === 'dark' ? 'Switch to Light Mode' : 'Switch to Night Study Dark Mode';
+    }
   }
 
   function sendMessage(message) {
@@ -178,10 +53,22 @@ function doPost(e) {
     feedbackBox.textContent = text;
   }
 
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   async function loadSettings() {
     try {
       const res = await sendMessage({ type: 'GET_SETTINGS' });
       if (res && res.ok && res.settings) {
+        applyTheme(res.settings.themeMode);
         apiKeyInput.value = res.settings.apiKey || '';
         if (sheetWebhookInput) {
           sheetWebhookInput.value = res.settings.sheetWebhookUrl || '';
@@ -198,6 +85,18 @@ function doPost(e) {
     }
   }
 
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', async () => {
+      const next = currentTheme === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      try {
+        await sendMessage({ type: 'SAVE_THEME_MODE', payload: { themeMode: next } });
+      } catch {
+        // Keep local toggle
+      }
+    });
+  }
+
   toggleKeyBtn.addEventListener('click', () => {
     const isPassword = apiKeyInput.type === 'password';
     apiKeyInput.type = isPassword ? 'text' : 'password';
@@ -211,6 +110,16 @@ function doPost(e) {
 
     try {
       const sheetWebhookUrl = sheetWebhookInput ? sheetWebhookInput.value.trim() : '';
+      if (sheetWebhookUrl) {
+        const validation = CUETShared.validateAppsScriptUrlInput(sheetWebhookUrl);
+        if (!validation.ok) {
+          showFeedback(validation.error, 'error');
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Settings';
+          return;
+        }
+      }
+
       const dailyGoalTarget = dailyGoalInput
         ? CUETShared.clampDailyGoal(dailyGoalInput.value)
         : CUETShared.DEFAULT_DAILY_GOAL;
@@ -223,6 +132,7 @@ function doPost(e) {
           sheetWebhookUrl,
           dailyGoalTarget,
           inPageHighlighter,
+          themeMode: currentTheme,
         },
       });
 
@@ -280,8 +190,9 @@ function doPost(e) {
   if (testSheetBtn) {
     testSheetBtn.addEventListener('click', async () => {
       const url = sheetWebhookInput ? sheetWebhookInput.value.trim() : '';
-      if (!url) {
-        showFeedback('Paste your Google Apps Script Web App URL first.', 'error');
+      const validation = CUETShared.validateAppsScriptUrlInput(url);
+      if (!validation.ok) {
+        showFeedback(validation.error, 'error');
         if (sheetWebhookInput) sheetWebhookInput.focus();
         return;
       }
@@ -293,11 +204,11 @@ function doPost(e) {
       try {
         const res = await sendMessage({
           type: 'TEST_SHEET_CONNECTION',
-          payload: { sheetWebhookUrl: url },
+          payload: { sheetWebhookUrl: validation.url },
         });
         if (res && res.ok) {
           showFeedback(
-            `Google Sheet connection succeeded! Ready to auto-save into Words, Idioms, and Phrasal Verbs tabs.`,
+            'Google Sheet connection succeeded! Ready to auto-save into Words, Idioms, and Phrasal Verbs tabs.',
             'ok'
           );
         } else {
@@ -322,6 +233,24 @@ function doPost(e) {
         }, 1800);
       } catch {
         showFeedback('Could not copy automatically — select and copy the script box below.', 'neutral');
+      }
+    });
+  }
+
+  document.querySelectorAll('[data-template-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const cat = btn.getAttribute('data-template-cat');
+      const csv = CUETShared.buildTemplateCsv(cat, [], false);
+      const slug = cat === 'phrasalVerbs' ? 'phrasal-verbs' : cat === 'idioms' ? 'idioms' : 'words';
+      downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `ipmat-cuet-template-${slug}.csv`);
+    });
+  });
+
+  if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+      if (changes.cuetVocabSettings && changes.cuetVocabSettings.newValue) {
+        applyTheme(changes.cuetVocabSettings.newValue.themeMode);
       }
     });
   }

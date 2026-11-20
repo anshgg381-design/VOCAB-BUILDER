@@ -8,12 +8,15 @@
 </head>
 <body>
   <div class="app-shell">
+    <!-- Slim Top Navigation Bar (fits cleanly in 1 page width without overflow) -->
     <header class="site-header">
       <div class="header-inner">
         <div class="brand-group">
-          <h1 class="site-title">IPMAT/CUET VOCAB BUILDER</h1>
+          <span class="brand-mark" aria-hidden="true">V</span>
+          <span class="site-title">IPMAT/CUET VOCAB BUILDER</span>
         </div>
-        <nav class="header-actions" aria-label="Library actions">
+
+        <nav class="header-actions" aria-label="Global controls">
           <div id="daily-goal-wrap" class="daily-goal-wrap">
             <button type="button" id="btn-daily-goal" class="daily-goal-btn" aria-expanded="false">
               <span id="daily-streak-text" class="daily-streak-text">🔥 0d</span>
@@ -40,25 +43,65 @@
               </form>
             </div>
           </div>
-          <button type="button" id="btn-study-mode" class="accent-btn">Study Mode</button>
-          <button type="button" id="btn-quiz-mode" class="outline-accent-btn">Quiz Mode</button>
-          <button type="button" id="btn-toggle-insights" class="secondary-btn" aria-expanded="true">Hide Insights</button>
-          <button type="button" id="btn-download-csv" class="primary-btn">Download CSV</button>
-          <button type="button" id="btn-download-pdf" class="secondary-btn">Download PDF</button>
-          <button type="button" id="btn-toggle-add" class="secondary-btn">Add Entries</button>
-          <button type="button" id="btn-toggle-backup" class="secondary-btn">Backup &amp; Export</button>
+
+          <button
+            type="button"
+            id="btn-theme-toggle"
+            class="theme-btn"
+            aria-label="Toggle Night Study Dark Mode"
+            title="Toggle Night Study Dark Mode"
+          >
+            <span id="theme-icon" aria-hidden="true">🌙</span>
+            <span id="theme-label">Dark</span>
+          </button>
+
           <a href="settings.html" class="nav-link">Settings</a>
         </nav>
       </div>
     </header>
 
     <main class="main-container">
+      <!-- Page Hero & Wrapping Action Toolbar -->
+      <section class="vault-hero" aria-label="Vocab Vault header">
+        <div class="vault-hero-text">
+          <h1 class="vault-heading">THE VOCAB VAULT<span class="vault-dot">.</span></h1>
+          <p class="vault-subtitle">
+            Personal IPMAT &amp; CUET vocabulary, idioms, and phrasal verbs with spaced repetition, flashcards, quizzes, and Google Sheets sync.
+          </p>
+        </div>
+
+        <div class="vault-actions" role="toolbar" aria-label="Library actions">
+          <button type="button" id="btn-study-mode" class="primary-btn">
+            <span>Study Mode</span>
+            <span id="due-today-pill" class="due-pill" hidden>0 Due</span>
+          </button>
+          <button type="button" id="btn-quiz-mode" class="outline-accent-btn">Quiz Mode</button>
+          <button type="button" id="btn-toggle-insights" class="secondary-btn" aria-expanded="true">Hide Insights</button>
+          <button type="button" id="btn-download-csv" class="secondary-btn">Download CSV</button>
+          <button type="button" id="btn-download-pdf" class="secondary-btn">Download PDF</button>
+          <button type="button" id="btn-toggle-add" class="secondary-btn" aria-expanded="false">Add Entries</button>
+          <button type="button" id="btn-toggle-backup" class="secondary-btn" aria-expanded="false">Backup &amp; Export</button>
+        </div>
+      </section>
+
       <div id="api-key-banner" class="banner-warn" hidden>
         <span>Add your Gemini API key in Settings to analyse or reanalyse expressions.</span>
         <a href="settings.html" class="banner-link">Open Settings</a>
       </div>
 
-      <div id="toast-bar" class="toast-bar" hidden aria-live="polite"></div>
+      <!-- Toast & 5-Second Undo Notification Bar -->
+      <div id="toast-bar" class="toast-bar" hidden aria-live="polite">
+        <div class="toast-inner">
+          <span id="toast-text" class="toast-text"></span>
+          <div class="toast-actions">
+            <button type="button" id="btn-toast-undo" class="toast-undo-btn" hidden>Undo</button>
+            <button type="button" id="btn-toast-dismiss" class="toast-dismiss-btn" aria-label="Dismiss notification">×</button>
+          </div>
+        </div>
+        <div id="toast-progress-wrap" class="toast-progress-wrap" hidden>
+          <div id="toast-progress-bar" class="toast-progress-bar"></div>
+        </div>
+      </div>
 
       <!-- Collapsible Add / Bulk Entry Panel -->
       <section id="add-panel" class="collapsible-panel" hidden aria-label="Add entries manually">
@@ -98,31 +141,172 @@
       <!-- Collapsible Backup & Export Panel -->
       <section id="backup-panel" class="collapsible-panel" hidden aria-label="Backup and export">
         <div class="panel-header">
-          <h2 class="panel-title">Local Storage &amp; Backups</h2>
+          <h2 class="panel-title">Backup, Restore &amp; Export</h2>
           <button type="button" id="btn-close-backup" class="text-btn">Close</button>
         </div>
         <p class="backup-note">
-          All entries are stored locally in your browser. Uninstalling this extension may permanently remove your locally stored data, so export a JSON backup periodically. Exported files never include your Gemini API key.
+          All entries are stored locally in your browser. Export a JSON backup periodically (exported files never include your Gemini API key or Sheet URL).
         </p>
         <div class="backup-actions">
-          <button type="button" id="btn-export-json" class="secondary-btn">Export JSON Backup</button>
-          <button type="button" id="btn-import-json" class="secondary-btn">Import JSON Backup</button>
+          <button type="button" id="btn-export-json" class="primary-btn">Export JSON Backup</button>
+          <button type="button" id="btn-copy-json" class="secondary-btn">Copy JSON</button>
+          <button type="button" id="btn-import-json" class="secondary-btn">Import JSON File</button>
+          <button type="button" id="btn-toggle-paste-json" class="secondary-btn">Paste JSON</button>
           <input type="file" id="import-file-input" accept=".json,application/json" hidden />
           <button type="button" id="btn-export-csv" class="secondary-btn">Download CSV</button>
-          <button type="button" id="btn-export-pdf" class="secondary-btn">Download as PDF</button>
+          <button type="button" id="btn-export-pdf" class="secondary-btn">Download PDF</button>
           <button type="button" id="btn-export-anki" class="secondary-btn">Export Anki (.tsv)</button>
           <button type="button" id="btn-sheet-push" class="secondary-btn">Push to Sheet</button>
           <button type="button" id="btn-sheet-pull" class="secondary-btn">Pull from Sheet</button>
           <button type="button" id="btn-clear-library" class="danger-btn">Clear Library</button>
         </div>
+
+        <div id="paste-json-box" class="paste-json-box" hidden>
+          <label for="paste-json-input" class="field-label">Paste exported JSON backup content to merge into your vault</label>
+          <textarea
+            id="paste-json-input"
+            class="textarea-input code-textarea"
+            rows="4"
+            placeholder='{"app":"IPMAT/CUET VOCAB BUILDER","entries":[...]}'
+          ></textarea>
+          <div class="paste-json-actions">
+            <button type="button" id="btn-paste-json-cancel" class="secondary-btn">Cancel</button>
+            <button type="button" id="btn-paste-json-merge" class="primary-btn">Import Pasted JSON</button>
+          </div>
+        </div>
+
         <p id="sheet-sync-note" class="backup-note sheet-sync-note" hidden></p>
       </section>
 
+      <!-- Exam Countdown & Daily Revision Pace Card -->
+      <section id="exam-card" class="nesoi-card exam-card" aria-label="Exam countdown and daily revision pace">
+        <div class="exam-row">
+          <div class="exam-info">
+            <div class="exam-title-row">
+              <h2 class="section-heading">Exam Countdown &amp; Revision Pace</h2>
+              <span id="exam-days-badge" class="exam-badge" hidden></span>
+            </div>
+            <p id="exam-summary" class="exam-summary">
+              Set your IPMAT or CUET exam date to automatically calculate how many words you need to master per day.
+            </p>
+          </div>
+          <div class="exam-controls">
+            <button type="button" id="btn-exam-toggle" class="secondary-btn btn-sm">Set Exam Date</button>
+            <button type="button" id="btn-exam-clear" class="text-btn" hidden>Clear</button>
+          </div>
+        </div>
+
+        <form id="exam-form" class="exam-form" hidden>
+          <div class="exam-field">
+            <label for="exam-name-input" class="field-label">Target Exam</label>
+            <input type="text" id="exam-name-input" class="text-input" placeholder="e.g. CUET UG or IPMAT Indore" value="CUET" maxlength="40" />
+          </div>
+          <div class="exam-field">
+            <label for="exam-date-input" class="field-label">Exam Date</label>
+            <input type="date" id="exam-date-input" class="text-input" required />
+          </div>
+          <div class="exam-form-actions">
+            <button type="submit" class="primary-btn btn-sm">Save Target</button>
+            <button type="button" id="btn-exam-cancel" class="secondary-btn btn-sm">Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Google Sheets Auto-Save Bar & Inline Setup Guide -->
+      <section class="nesoi-card sheets-card" aria-label="Google Sheets Auto-Save">
+        <div class="sheets-bar-row">
+          <div class="sheets-bar-info">
+            <div class="sheets-title-row">
+              <h2 class="section-heading">Google Sheets Auto-Save</h2>
+              <span id="sheets-connected-badge" class="status-chip" hidden>Apps Script Active · Tabs: Words, Idioms, Phrasal Verbs</span>
+            </div>
+            <p id="sheets-bar-desc" class="sheets-desc">
+              Download starter 3-tab CSV templates &amp; follow the 60-second Apps Script guide to auto-save, Push, and Pull with Google Sheets.
+            </p>
+          </div>
+          <div class="sheets-bar-actions">
+            <button type="button" id="btn-toggle-sheets-guide" class="soft-navy-btn btn-sm" aria-expanded="false">
+              Sheet Template &amp; Setup
+            </button>
+            <a
+              href="https://docs.google.com/spreadsheets"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="secondary-btn btn-sm link-btn"
+            >
+              Open Google Sheets &rarr;
+            </a>
+            <button type="button" id="btn-bar-sheet-push" class="primary-btn btn-sm" hidden>Push to Sheet</button>
+            <button type="button" id="btn-bar-sheet-pull" class="soft-navy-btn btn-sm" hidden>Pull from Sheet</button>
+            <button type="button" id="btn-bar-sheet-disconnect" class="text-btn" hidden>Disconnect</button>
+          </div>
+        </div>
+
+        <div id="sheets-inline-status" class="inline-status" hidden aria-live="polite"></div>
+
+        <!-- Expandable Google Sheets Setup Guide -->
+        <div id="sheets-guide-panel" class="sheets-guide-panel" hidden>
+          <div class="guide-divider"></div>
+
+          <div class="guide-grid">
+            <div class="guide-block">
+              <h3 class="guide-step-title">Step 1 · Download Starter Sheet Templates (Optional)</h3>
+              <p class="guide-note">
+                Each file has the exact 3 columns (<code>Word / Idiom / Phrasal Verb</code>, <code>Meaning</code>, <code>Example Sentence</code>). Or just open a blank sheet — the Apps Script creates the 3 tabs automatically.
+              </p>
+              <label class="checkbox-inline" for="tpl-include-entries">
+                <input type="checkbox" id="tpl-include-entries" checked />
+                <span>Pre-fill starter CSVs with my saved entries</span>
+              </label>
+              <div class="guide-btn-row">
+                <button type="button" id="btn-tpl-words" class="secondary-btn btn-sm">Words CSV</button>
+                <button type="button" id="btn-tpl-idioms" class="secondary-btn btn-sm">Idioms CSV</button>
+                <button type="button" id="btn-tpl-phrasal" class="secondary-btn btn-sm">Phrasal Verbs CSV</button>
+              </div>
+            </div>
+
+            <div class="guide-block">
+              <h3 class="guide-step-title">Step 2 · Deploy Apps Script (60 Seconds)</h3>
+              <ol class="guide-steps">
+                <li>Open your Google Sheet (or visit <strong>sheets.new</strong>) and click <strong>Extensions &rarr; Apps Script</strong>.</li>
+                <li>Clear any starter code, paste the script below, and press <strong>Ctrl+S</strong> (or Cmd+S).</li>
+                <li>Click <strong>Deploy &rarr; New deployment &rarr; Web app</strong>.</li>
+                <li>Set <strong>Execute as: Me</strong> and <strong>Who has access: Anyone</strong>, then click <strong>Deploy</strong> &amp; authorise access.</li>
+                <li>Copy the Web App URL ending in <code>/exec</code> and connect it in Step 3.</li>
+              </ol>
+            </div>
+          </div>
+
+          <div class="guide-code-header">
+            <span class="field-label">Apps Script Code (Supports Auto-Save, Push &amp; Pull)</span>
+            <button type="button" id="btn-guide-copy-script" class="soft-navy-btn btn-sm">Copy Apps Script</button>
+          </div>
+          <pre id="guide-apps-script-code" class="code-box"></pre>
+
+          <form id="sheets-connect-form" class="sheets-connect-form" novalidate>
+            <label for="guide-sheet-url-input" class="field-label">
+              Step 3 · Paste Your Deployed Web App URL (ends in <code>/exec</code>)
+            </label>
+            <div class="sheets-connect-row">
+              <input
+                type="url"
+                id="guide-sheet-url-input"
+                class="text-input"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="https://script.google.com/macros/s/.../exec"
+              />
+              <button type="submit" id="btn-guide-connect" class="primary-btn">Test &amp; Connect</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
       <!-- Mastery Progress Overview -->
-      <section class="mastery-card" aria-label="Mastery progress">
+      <section class="nesoi-card mastery-card" aria-label="Mastery progress">
         <div class="mastery-head">
           <div>
-            <h2 class="mastery-title">Mastery Progress</h2>
+            <h2 class="section-heading">Mastery Progress</h2>
             <p id="mastery-counts" class="mastery-counts">0 mastered · 0 learning · 0 new</p>
           </div>
           <div id="mastery-percent" class="mastery-percent">0% Mastered</div>
@@ -142,10 +326,10 @@
       </section>
 
       <!-- Unlockable Mastery Badges -->
-      <section class="badges-card" aria-label="Mastery badges">
+      <section class="nesoi-card badges-card" aria-label="Mastery badges">
         <div class="badges-head">
           <div class="badges-title-row">
-            <h2 class="mastery-title">Mastery Badges</h2>
+            <h2 class="section-heading">Mastery Badges</h2>
             <p id="badges-summary" class="badges-summary">0 of 5 unlocked · 0 words mastered</p>
           </div>
           <p id="badges-rank-status" class="badges-rank-status">Master 1 word to unlock Novice</p>
@@ -154,15 +338,16 @@
       </section>
 
       <!-- Flashcard Study Mode Panel -->
-      <section id="study-panel" class="study-panel" hidden aria-label="Flashcard Study Mode">
+      <section id="study-panel" class="nesoi-card study-panel" hidden aria-label="Flashcard Study Mode">
         <div class="study-topbar">
           <div>
             <h2 id="study-heading" class="panel-title">Study Mode</h2>
-            <p class="study-subtitle">Recall the meaning first, then flip the card to reveal it.</p>
+            <p class="study-subtitle">Recall the meaning first, then click the card or press Space to flip it.</p>
           </div>
           <div class="study-controls">
             <label for="study-deck-select" class="sr-only">Study deck</label>
             <select id="study-deck-select" class="select-input">
+              <option value="dailyReview">Due Today (SRS)</option>
               <option value="all">All Collections</option>
               <option value="needsReview">Needs Review</option>
               <option value="vocabulary">Vocabulary</option>
@@ -177,11 +362,11 @@
       </section>
 
       <!-- Multiple-Choice Quiz Mode Panel -->
-      <section id="quiz-panel" class="study-panel" hidden aria-label="Multiple-Choice Quiz Mode">
+      <section id="quiz-panel" class="nesoi-card study-panel" hidden aria-label="Multiple-Choice Quiz Mode">
         <div class="study-topbar">
           <div>
             <h2 class="panel-title">Quiz Mode</h2>
-            <p class="study-subtitle">Multiple-choice recall quiz (5–20 questions) from your New and Learning entries.</p>
+            <p class="study-subtitle">Multiple-choice recall quiz (5–20 questions) from your New and Learning entries. Missed words are automatically logged for practice.</p>
           </div>
           <div class="study-controls">
             <button type="button" id="btn-quiz-setup" class="secondary-btn" hidden>Quiz Setup</button>
@@ -192,116 +377,177 @@
       </section>
 
       <div id="library-list-view">
-      <!-- Top Real-Time Search, Sort & Filter Toolbar -->
-      <section class="toolbar" aria-label="Search and filter entries">
-        <div class="search-wrap">
-          <label for="search-input" class="sr-only">Search by word, meaning, or source title</label>
-          <input
-            type="text"
-            role="searchbox"
-            autocomplete="off"
-            id="search-input"
-            class="search-input"
-            placeholder="Search by word, meaning, or source title…"
-          />
+        <!-- Insights Summary & Bar Charts -->
+        <section id="insights-panel" class="nesoi-card insights-panel" aria-label="Library insights">
+          <div class="insights-head">
+            <div>
+              <h2 class="section-heading">Insights</h2>
+              <p class="insights-sub">Category coverage and mastery distribution across your saved collection.</p>
+            </div>
+            <div class="mastery-toggle" role="group" aria-label="Category chart metric">
+              <button type="button" id="btn-insights-mastered" class="mastery-opt is-active is-mastered" aria-pressed="true">Learned</button>
+              <button type="button" id="btn-insights-all" class="mastery-opt" aria-pressed="false">All Entries</button>
+            </div>
+          </div>
+          <div id="insights-kpis" class="insights-kpis"></div>
+          <div class="insights-grid">
+            <div class="insight-card">
+              <h3 class="insight-card-title" id="insight-cat-title">Learned per Category</h3>
+              <div id="insight-cat-bars" class="insight-bars"></div>
+            </div>
+            <div class="insight-card">
+              <h3 class="insight-card-title">Mastery Distribution</h3>
+              <div id="insight-mastery-bars" class="insight-bars"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Real-Time Search, Source, Mastery & Quick Filters Card -->
+        <section class="nesoi-card filter-card" aria-label="Search and filter entries">
+          <div class="toolbar">
+            <div class="search-wrap">
+              <label for="search-input" class="sr-only">Search by word, meaning, or source title</label>
+              <input
+                type="text"
+                role="searchbox"
+                autocomplete="off"
+                id="search-input"
+                class="search-input"
+                placeholder="Search by word, meaning, or source title…"
+              />
+              <button
+                type="button"
+                id="btn-clear-search"
+                class="search-clear-btn"
+                aria-label="Clear search"
+                hidden
+              >
+                Clear
+              </button>
+            </div>
+
+            <div class="toolbar-controls">
+              <div class="control-group">
+                <label for="filter-select" class="sr-only">Filter by mastery level</label>
+                <select id="filter-select" class="select-input">
+                  <option value="all">All levels</option>
+                  <option value="dueToday">Due Today (SRS)</option>
+                  <option value="needsPractice">Needs Practice</option>
+                  <option value="new">New</option>
+                  <option value="learning">Learning</option>
+                  <option value="mastered">Mastered</option>
+                  <option value="favourites">Favourites</option>
+                </select>
+              </div>
+
+              <div class="control-group">
+                <label for="source-select" class="sr-only">Filter by reading source</label>
+                <select id="source-select" class="select-input">
+                  <option value="all">All sources</option>
+                </select>
+              </div>
+
+              <div class="control-group">
+                <label for="sort-select" class="sr-only">Sort order</label>
+                <select id="sort-select" class="select-input">
+                  <option value="recent">Recently added</option>
+                  <option value="az">Alphabetical (A–Z)</option>
+                  <option value="za">Alphabetical (Z–A)</option>
+                  <option value="mostMissed">Most missed</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Revision Filters & Multi-Select Mode Toggle -->
+          <div class="quick-filter-row">
+            <div class="quick-filter-group">
+              <button type="button" id="btn-quick-due" class="quick-chip" aria-pressed="false">
+                Due Today <span id="quick-due-count" class="chip-count">0</span>
+              </button>
+              <button type="button" id="btn-quick-practice" class="quick-chip" aria-pressed="false">
+                Needs Practice <span id="quick-practice-count" class="chip-count">0</span>
+              </button>
+              <button type="button" id="btn-reset-filters" class="text-btn" hidden>Reset filters</button>
+            </div>
+            <button type="button" id="btn-select-mode" class="secondary-btn btn-sm" aria-pressed="false">
+              Select
+            </button>
+          </div>
+
+          <!-- Bulk Action Bar (visible when Select mode is active) -->
+          <div id="bulk-bar" class="bulk-bar" hidden role="region" aria-label="Bulk actions">
+            <div class="bulk-bar-left">
+              <strong id="bulk-count-label" class="bulk-count">0 selected</strong>
+              <button type="button" id="btn-bulk-select-all" class="text-btn">Select All Visible</button>
+              <button type="button" id="btn-bulk-clear" class="text-btn">Clear Selection</button>
+            </div>
+            <div class="bulk-bar-actions">
+              <button type="button" id="btn-bulk-mastered" class="secondary-btn btn-sm">Mark Mastered</button>
+              <button type="button" id="btn-bulk-learning" class="secondary-btn btn-sm">Mark Learning</button>
+              <select id="bulk-move-select" class="select-input select-sm" aria-label="Move selected to category">
+                <option value="">Move category…</option>
+                <option value="vocabulary">Move to Vocabulary</option>
+                <option value="idioms">Move to Idioms</option>
+                <option value="phrasalVerbs">Move to Phrasal Verbs</option>
+              </select>
+              <button type="button" id="btn-bulk-pdf" class="secondary-btn btn-sm">Export PDF</button>
+              <button type="button" id="btn-bulk-anki" class="secondary-btn btn-sm">Export Anki</button>
+              <button type="button" id="btn-bulk-delete" class="danger-btn btn-sm">Delete Selected</button>
+            </div>
+          </div>
+
+          <p id="search-meta" class="search-meta" hidden></p>
+        </section>
+
+        <!-- Collection Tabs -->
+        <div class="tabs-bar" role="tablist" aria-label="Vocabulary collections">
           <button
             type="button"
-            id="btn-clear-search"
-            class="search-clear-btn"
-            aria-label="Clear search"
-            hidden
+            role="tab"
+            id="tab-all"
+            class="tab-btn"
+            aria-selected="false"
+            data-tab="all"
           >
-            Clear
+            All <span class="tab-count" id="tab-count-all">0</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-vocabulary"
+            class="tab-btn"
+            aria-selected="true"
+            data-tab="vocabulary"
+          >
+            Vocabulary <span class="tab-count" id="tab-count-vocabulary">0</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-idioms"
+            class="tab-btn"
+            aria-selected="false"
+            data-tab="idioms"
+          >
+            Idioms <span class="tab-count" id="tab-count-idioms">0</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-phrasalVerbs"
+            class="tab-btn"
+            aria-selected="false"
+            data-tab="phrasalVerbs"
+          >
+            Phrasal Verbs <span class="tab-count" id="tab-count-phrasalVerbs">0</span>
           </button>
         </div>
 
-        <div class="toolbar-controls">
-          <div class="control-group">
-            <label for="filter-select" class="sr-only">Filter by mastery level</label>
-            <select id="filter-select" class="select-input">
-              <option value="all">All levels</option>
-              <option value="new">New</option>
-              <option value="learning">Learning</option>
-              <option value="mastered">Mastered</option>
-              <option value="favourites">Favourites</option>
-            </select>
-          </div>
-
-          <div class="control-group">
-            <label for="sort-select" class="sr-only">Sort order</label>
-            <select id="sort-select" class="select-input">
-              <option value="recent">Recently added</option>
-              <option value="az">Alphabetical (A–Z)</option>
-              <option value="za">Alphabetical (Z–A)</option>
-            </select>
-          </div>
-        </div>
-      </section>
-      <p id="search-meta" class="search-meta" hidden></p>
-
-      <!-- Insights Summary & Bar Charts -->
-      <section id="insights-panel" class="insights-panel" aria-label="Library insights">
-        <div class="insights-head">
-          <div>
-            <h2 class="mastery-title">Insights</h2>
-            <p class="insights-sub">Category coverage and mastery distribution across your saved collection.</p>
-          </div>
-          <div class="mastery-toggle" role="group" aria-label="Category chart metric">
-            <button type="button" id="btn-insights-mastered" class="mastery-opt is-active is-mastered" aria-pressed="true">Learned</button>
-            <button type="button" id="btn-insights-all" class="mastery-opt" aria-pressed="false">All Entries</button>
-          </div>
-        </div>
-        <div id="insights-kpis" class="insights-kpis"></div>
-        <div class="insights-grid">
-          <div class="insight-card">
-            <h3 class="insight-card-title" id="insight-cat-title">Learned per Category</h3>
-            <div id="insight-cat-bars" class="insight-bars"></div>
-          </div>
-          <div class="insight-card">
-            <h3 class="insight-card-title">Mastery Distribution</h3>
-            <div id="insight-mastery-bars" class="insight-bars"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Three Collection Tabs -->
-      <div class="tabs-bar" role="tablist" aria-label="Vocabulary collections">
-        <button
-          type="button"
-          role="tab"
-          id="tab-vocabulary"
-          class="tab-btn"
-          aria-selected="true"
-          data-tab="vocabulary"
-        >
-          Vocabulary <span class="tab-count" id="tab-count-vocabulary">0</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="tab-idioms"
-          class="tab-btn"
-          aria-selected="false"
-          data-tab="idioms"
-        >
-          Idioms <span class="tab-count" id="tab-count-idioms">0</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          id="tab-phrasalVerbs"
-          class="tab-btn"
-          aria-selected="false"
-          data-tab="phrasalVerbs"
-        >
-          Phrasal Verbs <span class="tab-count" id="tab-count-phrasalVerbs">0</span>
-        </button>
-      </div>
-
-      <!-- Entries List -->
-      <section aria-live="polite" aria-label="Saved entries">
-        <div id="entries-list" class="entries-list"></div>
-      </section>
+        <!-- Entries List -->
+        <section aria-live="polite" aria-label="Saved entries">
+          <div id="entries-list" class="entries-list"></div>
+        </section>
       </div>
     </main>
   </div>
@@ -349,14 +595,14 @@
     </form>
   </dialog>
 
-  <!-- Confirm Delete / Clear Dialog -->
+  <!-- Confirm Clear Library Dialog -->
   <dialog id="confirm-dialog" class="modal-dialog modal-narrow" aria-labelledby="confirm-title">
     <div class="modal-form">
       <h2 id="confirm-title" class="modal-title">Confirm Action</h2>
       <p id="confirm-message" class="confirm-text"></p>
       <div class="modal-actions">
         <button type="button" id="btn-confirm-cancel" class="secondary-btn">Cancel</button>
-        <button type="button" id="btn-confirm-proceed" class="danger-solid-btn">Delete</button>
+        <button type="button" id="btn-confirm-proceed" class="danger-solid-btn">Confirm</button>
       </div>
     </div>
   </dialog>

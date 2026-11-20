@@ -9,11 +9,22 @@
 <body>
   <div class="page-wrap">
     <header class="top-bar">
-      <div>
+      <div class="title-block">
+        <div class="brand-kicker">IPMAT/CUET VOCAB BUILDER</div>
         <h1 class="page-title">Settings</h1>
-        <p class="page-subtitle">Configure your personal Gemini API key (powered by Gemini 3.1 Flash Lite) for IPMAT/CUET VOCAB BUILDER.</p>
+        <p class="page-subtitle">Configure your personal Gemini API key (powered by Gemini 3.1 Flash Lite) and Google Sheets Auto-Save.</p>
       </div>
-      <a href="dashboard.html" class="nav-link">Open THE VOCAB VAULT</a>
+      <div class="top-bar-actions">
+        <button
+          type="button"
+          id="btn-theme-toggle"
+          class="secondary-btn btn-sm"
+          aria-label="Toggle dark mode"
+        >
+          ☾ Night Mode
+        </button>
+        <a href="dashboard.html" class="nav-link">Open THE VOCAB VAULT</a>
+      </div>
     </header>
 
     <main class="content">
@@ -105,8 +116,8 @@
       <section class="panel" aria-labelledby="capture-shortcuts-heading">
         <h2 id="capture-shortcuts-heading" class="section-title">Quick Capture Shortcuts &amp; Context Menu</h2>
         <ul class="notes-list">
-          <li><strong>Right-Click Menu:</strong> Highlight text on any webpage or embedded PDF, right-click, and choose <strong>Save to IPMAT/CUET VOCAB BUILDER</strong>.</li>
-          <li><strong>Keyboard Shortcut:</strong> Select any word or phrase and press <code>Alt + Shift + V</code> (<code>Option + Shift + V</code> on Mac) or <code>Alt + Shift + S</code> to open the Save card instantly.</li>
+          <li><strong>Right-Click Menu:</strong> Highlight text on any webpage or embedded PDF, right-click, and choose <strong>Add to Vocab Vault</strong>.</li>
+          <li><strong>Keyboard Shortcut:</strong> Select any word or phrase and press <code>Alt + Shift + V</code> (<code>Option + Shift + V</code> on Mac) or <code>Alt + Shift + S</code> to open the Add to Vocab Vault card instantly.</li>
           <li><strong>Customize Shortcut:</strong> Open your browser&apos;s Extensions Shortcuts page (e.g. <code>chrome://extensions/shortcuts</code>) anytime to rebind it.</li>
         </ul>
       </section>
@@ -114,15 +125,26 @@
       <section class="panel" aria-labelledby="sheets-guide-heading">
         <div class="section-head-row">
           <h2 id="sheets-guide-heading" class="section-title">Auto-Save to Google Sheets (60-Second Setup)</h2>
-          <button type="button" id="btn-copy-script" class="secondary-btn btn-sm">Copy Apps Script</button>
+          <div class="section-head-actions">
+            <a href="https://sheets.new" target="_blank" rel="noopener noreferrer" class="secondary-btn btn-sm link-btn">
+              Open Google Sheets ↗
+            </a>
+            <button type="button" id="btn-copy-script" class="secondary-btn btn-sm">Copy Apps Script</button>
+          </div>
         </div>
         <ol class="steps-list">
-          <li>Open a new Google Sheet at <strong>sheets.new</strong> (or import the 3-tab starter template from the web app).</li>
+          <li>Open a new Google Sheet at <strong>sheets.new</strong> (or download the 3 starter CSV templates below and import them into separate tabs).</li>
           <li>In the top menu, click <strong>Extensions &rarr; Apps Script</strong>.</li>
           <li>Delete any starter text in the editor, paste the script below, and press <strong>Ctrl+S</strong> (or Cmd+S) to save.</li>
           <li>Click <strong>Deploy &rarr; New deployment</strong>, choose <strong>Web app</strong>, set <strong>Who has access</strong> to <strong>Anyone</strong>, and click <strong>Deploy</strong>.</li>
           <li>Copy the generated Web App URL (ends with <code>/exec</code>), paste it into <strong>Google Sheets Auto-Save URL</strong> above, click <strong>Save Settings</strong>, and click <strong>Test Google Sheet</strong>.</li>
         </ol>
+        <div class="template-row">
+          <span class="template-label">Starter 3-tab CSVs:</span>
+          <button type="button" class="secondary-btn btn-sm" data-template-cat="vocabulary">Words CSV</button>
+          <button type="button" class="secondary-btn btn-sm" data-template-cat="idioms">Idioms CSV</button>
+          <button type="button" class="secondary-btn btn-sm" data-template-cat="phrasalVerbs">Phrasal Verbs CSV</button>
+        </div>
         <pre id="apps-script-code" class="code-box"></pre>
       </section>
 

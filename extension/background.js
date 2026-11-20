@@ -15,7 +15,7 @@ async function updateActionBadge() {
     const badge = CUETShared.getToolbarBadgeText(entries, settings.dailyGoalTarget);
     await chrome.action.setBadgeText({ text: badge.text });
     await chrome.action.setBadgeBackgroundColor({
-      color: badge.isGoalReached ? '#0f766e' : '#081C33',
+      color: badge.isGoalReached ? '#EA580C' : '#002962',
     });
   } catch {
     // Ignore badge errors in restricted contexts
@@ -30,7 +30,7 @@ function registerContextMenus() {
       chrome.contextMenus.create(
         {
           id: 'save-to-vocab-builder',
-          title: 'Save to IPMAT/CUET VOCAB BUILDER',
+          title: 'Add to Vocab Vault',
           contexts: ['selection'],
         },
         () => {
@@ -105,7 +105,7 @@ if (chrome.contextMenus && chrome.contextMenus.onClicked) {
     }).catch((err) => ({ ok: false, error: err instanceof Error ? err.message : 'Save failed.' }));
 
     if (result && result.ok) {
-      await flashBadgeStatus('+1', '#0f766e');
+      await flashBadgeStatus('+1', '#EA580C');
     } else if (result && result.duplicate) {
       await flashBadgeStatus('SAV', '#002962');
     } else {
@@ -382,6 +382,7 @@ async function analyseSingleExpression({ expression, category, contextSentence, 
   const rawText = await callGeminiApi(settings.apiKey, model, prompt);
   const analysis = CUETShared.parseGeminiResponse(rawText, cleaned);
 
+  const initialSchedule = CUETShared.createInitialReviewSchedule(new Date());
   const newEntry = {
     id: CUETShared.generateId(),
     expression: analysis.expression,
@@ -395,6 +396,7 @@ async function analyseSingleExpression({ expression, category, contextSentence, 
     learned: false,
     masteryLevel: 'new',
     favourite: false,
+    ...initialSchedule,
   };
 
   // Re-read storage right before saving to avoid race conditions
@@ -491,9 +493,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             counts: CUETShared.getCategoryCounts(entries),
             hasApiKey: Boolean(settings.apiKey && settings.apiKey.trim()),
             hasSheetWebhook: Boolean(settings.sheetWebhookUrl && settings.sheetWebhookUrl.trim()),
+            sheetWebhookUrl: settings.sheetWebhookUrl || '',
             inPageHighlighter: settings.inPageHighlighter !== false,
             activeModel: getActiveModel(settings),
             dailyGoalTarget: CUETShared.clampDailyGoal(settings.dailyGoalTarget),
+            themeMode: settings.themeMode === 'dark' ? 'dark' : 'light',
+            examConfig: settings.examConfig && settings.examConfig.examDate ? settings.examConfig : null,
           });
           return;
         }
@@ -578,6 +583,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }
 
+          const prevMastery = CUETShared.getMasteryLevel(current);
+          const hasMasteryUpdate =
+            (patch && CUETShared.VALID_MASTERY_LEVELS.includes(patch.masteryLevel)) ||
+            typeof patch?.learned === 'boolean';
           const nextMastery =
             patch && CUETShared.VALID_MASTERY_LEVELS.includes(patch.masteryLevel)
               ? patch.masteryLevel
@@ -585,7 +594,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 ? patch.learned
                   ? 'mastered'
                   : 'new'
-                : CUETShared.getMasteryLevel(current);
+                : prevMastery;
+
+          const skipReview = Boolean(patch?.skipReviewSchedule || message.payload?.skipReviewSchedule);
+          const srsPatch =
+            hasMasteryUpdate && !skipReview
+              ? CUETShared.calculateReviewPatch(current, nextMastery, {
+                  countAsReview: patch?.countAsReview !== false && message.payload?.countAsReview !== false,
+                })
+              : {};
 
           const updated = {
             ...current,
@@ -605,6 +622,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             learned: nextMastery === 'mastered',
             masteryLevel: nextMastery,
             favourite: typeof patch?.favourite === 'boolean' ? patch.favourite : current.favourite,
+            ...srsPatch,
           };
 
           entries[idx] = updated;
@@ -613,6 +631,71 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             ok: true,
             entry: updated,
             counts: CUETShared.getCategoryCounts(entries),
+          });
+          return;
+        }
+
+        case 'RECORD_MISS': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const id = message.payload?.id;
+          const entries = await getEntries();
+          const idx = entries.findIndex((e) => e.id === id);
+          if (idx === -1) {
+            sendResponse({ ok: false, error: 'Entry not found.' });
+            return;
+          }
+          const missPatch = CUETShared.recordEntryMissPatch(entries[idx], new Date());
+          const updated = { ...entries[idx], ...missPatch };
+          entries[idx] = updated;
+          await saveEntries(entries);
+          sendResponse({
+            ok: true,
+            entry: updated,
+            counts: CUETShared.getCategoryCounts(entries),
+          });
+          return;
+        }
+
+        case 'BULK_UPDATE_ENTRIES': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const ids = Array.isArray(message.payload?.ids) ? new Set(message.payload.ids) : new Set();
+          const patch = message.payload?.patch || {};
+          if (ids.size === 0) {
+            sendResponse({ ok: true, updatedCount: 0 });
+            return;
+          }
+          const entries = await getEntries();
+          let updatedCount = 0;
+          const next = entries.map((entry) => {
+            if (!ids.has(entry.id)) return entry;
+            updatedCount++;
+            let updated = { ...entry };
+            if (CUETShared.VALID_CATEGORIES.includes(patch.category)) {
+              updated.category = patch.category;
+            }
+            if (CUETShared.VALID_MASTERY_LEVELS.includes(patch.masteryLevel)) {
+              const srs = CUETShared.calculateReviewPatch(updated, patch.masteryLevel, {
+                countAsReview: true,
+              });
+              updated = { ...updated, ...srs };
+            }
+            if (typeof patch.favourite === 'boolean') {
+              updated.favourite = patch.favourite;
+            }
+            return updated;
+          });
+          await saveEntries(next);
+          sendResponse({
+            ok: true,
+            updatedCount,
+            entries: next,
+            counts: CUETShared.getCategoryCounts(next),
           });
           return;
         }
@@ -628,6 +711,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await saveEntries(next);
           sendResponse({
             ok: true,
+            counts: CUETShared.getCategoryCounts(next),
+          });
+          return;
+        }
+
+        case 'DELETE_ENTRIES': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const ids = new Set(Array.isArray(message.payload?.ids) ? message.payload.ids : []);
+          const entries = await getEntries();
+          const next = entries.filter((e) => !ids.has(e.id));
+          await saveEntries(next);
+          sendResponse({
+            ok: true,
+            deletedCount: entries.length - next.length,
+            counts: CUETShared.getCategoryCounts(next),
+          });
+          return;
+        }
+
+        case 'RESTORE_ENTRIES': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const toRestore = Array.isArray(message.payload?.entries) ? message.payload.entries : [];
+          const entries = await getEntries();
+          const existingIds = new Set(entries.map((e) => e.id));
+          const existingKeys = new Set(entries.map((e) => CUETShared.normalizeKey(e.expression)));
+          const added = [];
+          for (const raw of toRestore) {
+            const clean = CUETShared.sanitizeEntry(raw);
+            if (!clean) continue;
+            const key = CUETShared.normalizeKey(clean.expression);
+            if (existingIds.has(clean.id) || existingKeys.has(key)) continue;
+            existingIds.add(clean.id);
+            existingKeys.add(key);
+            added.push(clean);
+          }
+          const next = [...added, ...entries];
+          await saveEntries(next);
+          sendResponse({
+            ok: true,
+            restoredCount: added.length,
+            entries: next,
             counts: CUETShared.getCategoryCounts(next),
           });
           return;
@@ -794,6 +924,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           const existingSettings = await getSettings();
           const next = {
+            ...existingSettings,
             apiKey: typeof message.payload?.apiKey === 'string' ? message.payload.apiKey.trim() : '',
             model: CUETShared.GEMINI_MODEL,
             sheetWebhookUrl:
@@ -808,6 +939,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               typeof message.payload?.inPageHighlighter === 'boolean'
                 ? message.payload.inPageHighlighter
                 : existingSettings.inPageHighlighter !== false,
+            themeMode:
+              message.payload?.themeMode === 'dark' || message.payload?.themeMode === 'light'
+                ? message.payload.themeMode
+                : existingSettings.themeMode === 'dark'
+                  ? 'dark'
+                  : 'light',
           };
           await chrome.storage.local.set({ [STORAGE_KEYS.settings]: next });
           await updateActionBadge();
@@ -826,6 +963,59 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await chrome.storage.local.set({ [STORAGE_KEYS.settings]: next });
           await updateActionBadge();
           sendResponse({ ok: true, dailyGoalTarget: target });
+          return;
+        }
+
+        case 'SAVE_THEME_MODE': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const existingSettings = await getSettings();
+          const themeMode = message.payload?.themeMode === 'dark' ? 'dark' : 'light';
+          const next = { ...existingSettings, themeMode };
+          await chrome.storage.local.set({ [STORAGE_KEYS.settings]: next });
+          sendResponse({ ok: true, themeMode });
+          return;
+        }
+
+        case 'SAVE_EXAM_CONFIG': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const existingSettings = await getSettings();
+          const raw = message.payload?.examConfig;
+          const examConfig =
+            raw && typeof raw.examDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.examDate.trim())
+              ? {
+                  examName: String(raw.examName || 'CUET').trim() || 'CUET',
+                  examDate: raw.examDate.trim(),
+                }
+              : null;
+          const next = { ...existingSettings, examConfig };
+          await chrome.storage.local.set({ [STORAGE_KEYS.settings]: next });
+          sendResponse({ ok: true, examConfig });
+          return;
+        }
+
+        case 'SAVE_SHEET_WEBHOOK': {
+          if (!isExtensionPage(sender)) {
+            sendResponse({ ok: false, error: 'Unauthorized action.' });
+            return;
+          }
+          const existingSettings = await getSettings();
+          const sheetWebhookUrl =
+            typeof message.payload?.sheetWebhookUrl === 'string'
+              ? message.payload.sheetWebhookUrl.trim()
+              : '';
+          const next = { ...existingSettings, sheetWebhookUrl };
+          await chrome.storage.local.set({ [STORAGE_KEYS.settings]: next });
+          sendResponse({
+            ok: true,
+            sheetWebhookUrl,
+            hasSheetWebhook: Boolean(sheetWebhookUrl),
+          });
           return;
         }
 

@@ -1,4 +1,4 @@
-/* CUET Vocabulary Builder — Dashboard Logic */
+/* IPMAT/CUET VOCAB BUILDER — THE VOCAB VAULT Dashboard Logic */
 (function () {
   'use strict';
 
@@ -6,29 +6,136 @@
   let activeTab = 'vocabulary';
   let searchQuery = '';
   let statusFilter = 'all';
+  let sourceFilter = 'all';
   let sortOrder = 'recent';
   let reanalysingIds = new Set();
   let pendingConfirmAction = null;
+
+  let themeMode = 'light';
+  let examConfig = null;
   let hasSheetWebhook = false;
+  let sheetWebhookUrl = '';
   let isSheetSyncBusy = false;
 
+  // Select / Bulk mode
+  let isSelectMode = false;
+  let selectedIds = new Set();
+
+  // Toast & 5s Undo state
+  let toastTimer = null;
+  let undoBuffer = null;
+
+  // Insights & Speech
+  let showInsights = true;
+  let insightsMetric = 'mastered';
+  let copiedEntryId = null;
+  let speakingKey = null;
+
+  // Study Mode
+  let isStudyMode = false;
+  let isQuizMode = false;
+  let studyScope = 'dailyReview';
+  let studyDeckIds = [];
+  let studyIndex = 0;
+  let studyFlipped = false;
+  let studyKnownIds = [];
+  let studyNeedsReviewIds = [];
+  let studyComplete = false;
+  let studyMissedRound = false;
+
+  // Quiz Mode
+  let quizPhase = 'setup';
+  let quizSelectionMode = 'random';
+  let quizCount = 5;
+  let quizSelectedIds = [];
+  let quizSetupError = '';
+  let quizQuestions = [];
+  let quizIndex = 0;
+  let quizChosenOption = null;
+  let quizAnswers = [];
+  let quizPromoted = false;
+
+  // Daily Goal
+  let dailyGoalTarget = CUETShared.DEFAULT_DAILY_GOAL;
+  let prevDailyGoalReached = null;
+  let dailyCelebrateTimer = null;
+
+  // DOM References
   const apiKeyBanner = document.getElementById('api-key-banner');
   const toastBar = document.getElementById('toast-bar');
-  const entriesList = document.getElementById('entries-list');
+  const toastText = document.getElementById('toast-text');
+  const btnToastUndo = document.getElementById('btn-toast-undo');
+  const btnToastDismiss = document.getElementById('btn-toast-dismiss');
+  const toastProgressWrap = document.getElementById('toast-progress-wrap');
+  const toastProgressBar = document.getElementById('toast-progress-bar');
 
+  const btnThemeToggle = document.getElementById('btn-theme-toggle');
+  const themeIcon = document.getElementById('theme-icon');
+  const themeLabel = document.getElementById('theme-label');
+
+  const entriesList = document.getElementById('entries-list');
   const tabBtns = Array.from(document.querySelectorAll('.tab-btn'));
   const tabCounts = {
+    all: document.getElementById('tab-count-all'),
     vocabulary: document.getElementById('tab-count-vocabulary'),
     idioms: document.getElementById('tab-count-idioms'),
     phrasalVerbs: document.getElementById('tab-count-phrasalVerbs'),
   };
 
+  // Search, Filters, Quick Chips & Bulk
   const searchInput = document.getElementById('search-input');
   const btnClearSearch = document.getElementById('btn-clear-search');
   const searchMeta = document.getElementById('search-meta');
   const filterSelect = document.getElementById('filter-select');
+  const sourceSelect = document.getElementById('source-select');
   const sortSelect = document.getElementById('sort-select');
+  const btnQuickDue = document.getElementById('btn-quick-due');
+  const quickDueCount = document.getElementById('quick-due-count');
+  const btnQuickPractice = document.getElementById('btn-quick-practice');
+  const quickPracticeCount = document.getElementById('quick-practice-count');
+  const btnResetFilters = document.getElementById('btn-reset-filters');
+  const btnSelectMode = document.getElementById('btn-select-mode');
+  const bulkBar = document.getElementById('bulk-bar');
+  const bulkCountLabel = document.getElementById('bulk-count-label');
+  const btnBulkSelectAll = document.getElementById('btn-bulk-select-all');
+  const btnBulkClear = document.getElementById('btn-bulk-clear');
+  const btnBulkMastered = document.getElementById('btn-bulk-mastered');
+  const btnBulkLearning = document.getElementById('btn-bulk-learning');
+  const bulkMoveSelect = document.getElementById('bulk-move-select');
+  const btnBulkPdf = document.getElementById('btn-bulk-pdf');
+  const btnBulkAnki = document.getElementById('btn-bulk-anki');
+  const btnBulkDelete = document.getElementById('btn-bulk-delete');
 
+  // Exam Countdown
+  const examDaysBadge = document.getElementById('exam-days-badge');
+  const examSummary = document.getElementById('exam-summary');
+  const btnExamToggle = document.getElementById('btn-exam-toggle');
+  const btnExamClear = document.getElementById('btn-exam-clear');
+  const examForm = document.getElementById('exam-form');
+  const examNameInput = document.getElementById('exam-name-input');
+  const examDateInput = document.getElementById('exam-date-input');
+  const btnExamCancel = document.getElementById('btn-exam-cancel');
+
+  // Google Sheets Bar & Inline Guide
+  const sheetsConnectedBadge = document.getElementById('sheets-connected-badge');
+  const sheetsBarDesc = document.getElementById('sheets-bar-desc');
+  const btnToggleSheetsGuide = document.getElementById('btn-toggle-sheets-guide');
+  const btnBarSheetPush = document.getElementById('btn-bar-sheet-push');
+  const btnBarSheetPull = document.getElementById('btn-bar-sheet-pull');
+  const btnBarSheetDisconnect = document.getElementById('btn-bar-sheet-disconnect');
+  const sheetsInlineStatus = document.getElementById('sheets-inline-status');
+  const sheetsGuidePanel = document.getElementById('sheets-guide-panel');
+  const tplIncludeEntries = document.getElementById('tpl-include-entries');
+  const btnTplWords = document.getElementById('btn-tpl-words');
+  const btnTplIdioms = document.getElementById('btn-tpl-idioms');
+  const btnTplPhrasal = document.getElementById('btn-tpl-phrasal');
+  const btnGuideCopyScript = document.getElementById('btn-guide-copy-script');
+  const guideAppsScriptCode = document.getElementById('guide-apps-script-code');
+  const sheetsConnectForm = document.getElementById('sheets-connect-form');
+  const guideSheetUrlInput = document.getElementById('guide-sheet-url-input');
+  const btnGuideConnect = document.getElementById('btn-guide-connect');
+
+  // Mastery & Badges
   const masteryCounts = document.getElementById('mastery-counts');
   const masteryPercent = document.getElementById('mastery-percent');
   const masteryProgressbar = document.getElementById('mastery-progressbar');
@@ -47,12 +154,10 @@
   const insightCatTitle = document.getElementById('insight-cat-title');
   const insightCatBars = document.getElementById('insight-cat-bars');
   const insightMasteryBars = document.getElementById('insight-mastery-bars');
-  let showInsights = true;
-  let insightsMetric = 'mastered';
-  let copiedEntryId = null;
 
-  // Study Mode
+  // Study Mode & Quiz Mode
   const btnStudyMode = document.getElementById('btn-study-mode');
+  const dueTodayPill = document.getElementById('due-today-pill');
   const studyPanel = document.getElementById('study-panel');
   const libraryListView = document.getElementById('library-list-view');
   const studyHeading = document.getElementById('study-heading');
@@ -61,34 +166,11 @@
   const btnStudyExit = document.getElementById('btn-study-exit');
   const studyStage = document.getElementById('study-stage');
 
-  let isStudyMode = false;
-  let isQuizMode = false;
-  let studyScope = 'all';
-  let studyDeckIds = [];
-  let studyIndex = 0;
-  let studyFlipped = false;
-  let studyKnownIds = [];
-  let studyNeedsReviewIds = [];
-  let studyComplete = false;
-  let studyMissedRound = false;
-
-  // Quiz Mode
   const btnQuizMode = document.getElementById('btn-quiz-mode');
   const quizPanel = document.getElementById('quiz-panel');
   const btnQuizSetup = document.getElementById('btn-quiz-setup');
   const btnQuizExit = document.getElementById('btn-quiz-exit');
   const quizStage = document.getElementById('quiz-stage');
-
-  let quizPhase = 'setup';
-  let quizSelectionMode = 'random';
-  let quizCount = 5;
-  let quizSelectedIds = [];
-  let quizSetupError = '';
-  let quizQuestions = [];
-  let quizIndex = 0;
-  let quizChosenOption = null;
-  let quizAnswers = [];
-  let quizPromoted = false;
 
   // Daily Goal
   const dailyGoalWrap = document.getElementById('daily-goal-wrap');
@@ -101,10 +183,6 @@
   const dailyPopFill = document.getElementById('daily-pop-fill');
   const dailyGoalForm = document.getElementById('daily-goal-form');
   const dailyGoalInput = document.getElementById('daily-goal-input');
-
-  let dailyGoalTarget = CUETShared.DEFAULT_DAILY_GOAL;
-  let prevDailyGoalReached = null;
-  let dailyCelebrateTimer = null;
 
   // Add panel
   const addPanel = document.getElementById('add-panel');
@@ -123,7 +201,13 @@
   const btnToggleBackup = document.getElementById('btn-toggle-backup');
   const btnCloseBackup = document.getElementById('btn-close-backup');
   const btnExportJson = document.getElementById('btn-export-json');
+  const btnCopyJson = document.getElementById('btn-copy-json');
   const btnImportJson = document.getElementById('btn-import-json');
+  const btnTogglePasteJson = document.getElementById('btn-toggle-paste-json');
+  const pasteJsonBox = document.getElementById('paste-json-box');
+  const pasteJsonInput = document.getElementById('paste-json-input');
+  const btnPasteJsonCancel = document.getElementById('btn-paste-json-cancel');
+  const btnPasteJsonMerge = document.getElementById('btn-paste-json-merge');
   const importFileInput = document.getElementById('import-file-input');
   const btnDownloadCsv = document.getElementById('btn-download-csv');
   const btnDownloadPdf = document.getElementById('btn-download-pdf');
@@ -135,7 +219,7 @@
   const sheetSyncNote = document.getElementById('sheet-sync-note');
   const btnClearLibrary = document.getElementById('btn-clear-library');
 
-  // PDF study sheet dialog
+  // PDF dialog
   const pdfDialog = document.getElementById('pdf-dialog');
   const pdfForm = document.getElementById('pdf-form');
   const pdfCategorySelect = document.getElementById('pdf-category-select');
@@ -164,7 +248,9 @@
   const btnConfirmCancel = document.getElementById('btn-confirm-cancel');
   const btnConfirmProceed = document.getElementById('btn-confirm-proceed');
 
-  let toastTimer = null;
+  if (guideAppsScriptCode && CUETShared.APPS_SCRIPT_TEMPLATE) {
+    guideAppsScriptCode.textContent = CUETShared.APPS_SCRIPT_TEMPLATE;
+  }
 
   function sendMessage(message) {
     return new Promise((resolve, reject) => {
@@ -178,158 +264,611 @@
     });
   }
 
-  function showToast(text, tone) {
-    if (toastTimer) clearTimeout(toastTimer);
+  // ==================== Theme (Night Study Dark Mode) ====================
+  function applyTheme(mode) {
+    themeMode = mode === 'dark' ? 'dark' : 'light';
+    document.documentElement.classList.toggle('dark', themeMode === 'dark');
+    if (themeIcon) themeIcon.textContent = themeMode === 'dark' ? '☀️' : '🌙';
+    if (themeLabel) themeLabel.textContent = themeMode === 'dark' ? 'Light' : 'Dark';
+  }
+
+  if (btnThemeToggle) {
+    btnThemeToggle.addEventListener('click', async () => {
+      const next = themeMode === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      try {
+        await sendMessage({ type: 'SAVE_THEME_MODE', payload: { themeMode: next } });
+      } catch {
+        // Keep local theme applied
+      }
+    });
+  }
+
+  // ==================== Toast & 5s Undo ====================
+  function hideToast() {
+    if (toastTimer) {
+      clearTimeout(toastTimer);
+      toastTimer = null;
+    }
+    undoBuffer = null;
+    toastBar.hidden = true;
+    btnToastUndo.hidden = true;
+    toastProgressWrap.hidden = true;
+    toastProgressBar.classList.remove('is-running');
+  }
+
+  function showToast(text, tone, options) {
+    const opts = options || {};
+    if (toastTimer) {
+      clearTimeout(toastTimer);
+      toastTimer = null;
+    }
     toastBar.hidden = false;
-    toastBar.className = 'toast-bar' + (tone ? ' ' + tone : '');
-    toastBar.textContent = text;
-    toastTimer = setTimeout(() => {
-      toastBar.hidden = true;
-    }, 5500);
+    toastBar.className = 'toast-bar';
+    if (tone === 'ok') toastBar.classList.add('ok');
+    if (tone === 'error') toastBar.classList.add('error');
+    if (tone === 'undo') toastBar.classList.add('undo');
+
+    toastText.textContent = text;
+
+    if (Array.isArray(opts.undoEntries) && opts.undoEntries.length > 0) {
+      undoBuffer = opts.undoEntries;
+      btnToastUndo.hidden = false;
+      toastProgressWrap.hidden = false;
+      toastProgressBar.classList.remove('is-running');
+      void toastProgressBar.offsetWidth; // trigger reflow for fresh 5s animation
+      toastProgressBar.classList.add('is-running');
+      toastTimer = setTimeout(() => {
+        hideToast();
+      }, 5000);
+    } else {
+      undoBuffer = null;
+      btnToastUndo.hidden = true;
+      toastProgressWrap.hidden = true;
+      toastProgressBar.classList.remove('is-running');
+      toastTimer = setTimeout(() => {
+        hideToast();
+      }, opts.duration || 4500);
+    }
   }
 
-  function openConfirm({ title, message, confirmLabel, onConfirm }) {
-    confirmTitle.textContent = title;
-    confirmMessage.textContent = message;
-    btnConfirmProceed.textContent = confirmLabel || 'Confirm';
-    pendingConfirmAction = onConfirm;
-    confirmDialog.showModal();
+  btnToastDismiss.addEventListener('click', hideToast);
+
+  btnToastUndo.addEventListener('click', async () => {
+    if (!undoBuffer || undoBuffer.length === 0) return;
+    const toRestore = [...undoBuffer];
+    hideToast();
+    try {
+      const res = await sendMessage({
+        type: 'RESTORE_ENTRIES',
+        payload: { entries: toRestore },
+      });
+      if (res && res.ok) {
+        await loadState();
+        showToast(
+          `Restored ${res.restoredCount || toRestore.length} ${
+            (res.restoredCount || toRestore.length) === 1 ? 'entry' : 'entries'
+          }.`,
+          'ok'
+        );
+      } else {
+        showToast((res && res.error) || 'Could not undo delete.', 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  // ==================== Speech Pronunciation ====================
+  function isSpeechSupported() {
+    return typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance === 'function';
   }
 
-  function triggerDownload(filename, content, mimeType) {
-    const blob = new Blob([content], { type: mimeType });
+  function stopSpeech() {
+    if (isSpeechSupported()) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // Ignore
+      }
+    }
+    speakingKey = null;
+    updateSpeakingButtonStates();
+  }
+
+  function updateSpeakingButtonStates() {
+    document.querySelectorAll('[data-speak-key]').forEach((btn) => {
+      const isCurrent = speakingKey && btn.getAttribute('data-speak-key') === speakingKey;
+      btn.classList.toggle('is-speaking', Boolean(isCurrent));
+      btn.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
+      const labelEl = btn.querySelector('.speak-label');
+      if (labelEl) {
+        labelEl.textContent = isCurrent ? 'Stop' : 'Listen';
+      }
+    });
+  }
+
+  function speakExpression(text, key) {
+    if (!isSpeechSupported()) {
+      showToast('Audio pronunciation is not supported in this browser.', 'error');
+      return;
+    }
+    const trimmed = String(text || '').trim();
+    if (!trimmed) return;
+    if (speakingKey === key) {
+      stopSpeech();
+      return;
+    }
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(trimmed);
+      utterance.lang = 'en-US';
+      utterance.rate = 0.94;
+      speakingKey = key;
+      updateSpeakingButtonStates();
+      utterance.onend = () => {
+        if (speakingKey === key) {
+          speakingKey = null;
+          updateSpeakingButtonStates();
+        }
+      };
+      utterance.onerror = () => {
+        if (speakingKey === key) {
+          speakingKey = null;
+          updateSpeakingButtonStates();
+        }
+      };
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      speakingKey = null;
+      updateSpeakingButtonStates();
+    }
+  }
+
+  function createSpeakChip(expression, key) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'row-action-chip' + (speakingKey === key ? ' is-speaking' : '');
+    btn.setAttribute('data-speak-key', key);
+    btn.setAttribute('aria-pressed', speakingKey === key ? 'true' : 'false');
+    btn.title = `Listen to pronunciation of "${expression}"`;
+    btn.innerHTML = `<span aria-hidden="true">🔊</span><span class="speak-label">${speakingKey === key ? 'Stop' : 'Listen'}</span>`;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      speakExpression(expression, key);
+    });
+    return btn;
+  }
+
+  // ==================== File Downloads (10s blob revoke safety) ====================
+  function triggerFileDownload(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
 
-  function getFilteredEntries() {
-    const query = searchQuery.trim().toLowerCase();
-    let list = allEntries.filter((e) => e.category === activeTab);
-
-    if (statusFilter === 'new' || statusFilter === 'learning' || statusFilter === 'mastered') {
-      list = list.filter((e) => CUETShared.getMasteryLevel(e) === statusFilter);
-    } else if (statusFilter === 'favourites') {
-      list = list.filter((e) => e.favourite);
+  // ==================== Exam Countdown ====================
+  function renderExamCountdown() {
+    const stats = CUETShared.computeExamCountdown(examConfig, allEntries, new Date());
+    if (!stats) {
+      examDaysBadge.hidden = true;
+      examSummary.textContent =
+        'Set your IPMAT or CUET exam date to automatically calculate how many words you need to master per day.';
+      btnExamToggle.textContent = 'Set Exam Date';
+      btnExamClear.hidden = true;
+      return;
     }
 
-    if (query) {
-      list = list.filter((e) => {
-        return (
-          (e.expression || '').toLowerCase().includes(query) ||
-          (e.meaning || '').toLowerCase().includes(query) ||
-          (e.example || '').toLowerCase().includes(query) ||
-          (e.contextSentence || '').toLowerCase().includes(query) ||
-          (e.sourceTitle || '').toLowerCase().includes(query)
-        );
-      });
-    }
-
-    list = [...list];
-    if (sortOrder === 'az') {
-      list.sort((a, b) => a.expression.localeCompare(b.expression, undefined, { sensitivity: 'base' }));
-    } else if (sortOrder === 'za') {
-      list.sort((a, b) => b.expression.localeCompare(a.expression, undefined, { sensitivity: 'base' }));
+    examDaysBadge.hidden = false;
+    if (stats.status === 'today') {
+      examDaysBadge.textContent = `${stats.examName} · Today`;
+    } else if (stats.status === 'past') {
+      examDaysBadge.textContent = `${stats.examName} · Passed`;
     } else {
-      list.sort((a, b) => Date.parse(b.dateAdded || '') - Date.parse(a.dateAdded || ''));
+      examDaysBadge.textContent = `${stats.daysRemaining}d to ${stats.examName}`;
     }
 
-    return list;
+    examSummary.textContent = stats.summaryText;
+    btnExamToggle.textContent = 'Edit Date';
+    btnExamClear.hidden = false;
   }
 
-  function updateTabCounts() {
-    const counts = CUETShared.getCategoryCounts(allEntries);
-    tabCounts.vocabulary.textContent = String(counts.vocabulary);
-    tabCounts.idioms.textContent = String(counts.idioms);
-    tabCounts.phrasalVerbs.textContent = String(counts.phrasalVerbs);
+  btnExamToggle.addEventListener('click', () => {
+    const isOpening = examForm.hidden;
+    examForm.hidden = !isOpening;
+    if (isOpening) {
+      examNameInput.value = (examConfig && examConfig.examName) || 'CUET';
+      examDateInput.value = (examConfig && examConfig.examDate) || '';
+      examNameInput.focus();
+    }
+  });
+
+  btnExamCancel.addEventListener('click', () => {
+    examForm.hidden = true;
+  });
+
+  btnExamClear.addEventListener('click', async () => {
+    try {
+      const res = await sendMessage({ type: 'SAVE_EXAM_CONFIG', payload: { examConfig: null } });
+      if (res && res.ok) {
+        examConfig = null;
+        examForm.hidden = true;
+        renderExamCountdown();
+        showToast('Exam countdown cleared.', 'neutral');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  examForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const examName = examNameInput.value.trim() || 'CUET';
+    const examDate = examDateInput.value.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(examDate)) {
+      showToast('Please pick a valid exam date.', 'error');
+      examDateInput.focus();
+      return;
+    }
+    try {
+      const res = await sendMessage({
+        type: 'SAVE_EXAM_CONFIG',
+        payload: { examConfig: { examName, examDate } },
+      });
+      if (res && res.ok) {
+        examConfig = res.examConfig;
+        examForm.hidden = true;
+        renderExamCountdown();
+        showToast(`Exam target saved for ${examName}.`, 'ok');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  // ==================== Google Sheets Auto-Save Bar & Inline Setup Guide ====================
+  function showSheetsInlineStatus(text, tone) {
+    sheetsInlineStatus.hidden = false;
+    sheetsInlineStatus.className = 'inline-status';
+    if (tone === 'ok') sheetsInlineStatus.classList.add('ok');
+    if (tone === 'error') sheetsInlineStatus.classList.add('error');
+    sheetsInlineStatus.textContent = text;
   }
 
-  function updateMasteryProgress() {
-    const stats = CUETShared.getMasteryStats(allEntries);
-    if (masteryCounts) {
-      masteryCounts.textContent = `${stats.masteredCount} mastered · ${stats.learningCount} learning · ${stats.newCount} new`;
-    }
-    if (masteryPercent) {
-      masteryPercent.textContent = `${stats.percentMastered}% Mastered`;
-    }
-    if (masteryProgressbar) {
-      masteryProgressbar.setAttribute('aria-valuenow', String(stats.percentMastered));
-    }
-    if (masteryFillMastered) {
-      masteryFillMastered.style.width = `${stats.percentMastered}%`;
-    }
-    if (masteryFillLearning) {
-      masteryFillLearning.style.width = `${Math.min(100 - stats.percentMastered, stats.percentLearning)}%`;
-    }
-  }
+  function updateSheetSyncControls() {
+    const connected = Boolean(hasSheetWebhook && sheetWebhookUrl);
+    sheetsConnectedBadge.hidden = !connected;
+    btnBarSheetPush.hidden = !connected || allEntries.length === 0;
+    btnBarSheetPull.hidden = !connected;
+    btnBarSheetDisconnect.hidden = !connected;
+    btnToggleSheetsGuide.textContent = connected ? 'Template & Deployment' : 'Sheet Template & Setup';
+    sheetsBarDesc.textContent = connected
+      ? "Connected via your Apps Script Web App URL. Every newly analysed entry appends automatically into your Google Sheet's 3 tabs."
+      : 'Download starter 3-tab CSV templates & follow the 60-second Apps Script guide to auto-save, Push, and Pull with Google Sheets.';
 
-  const BADGE_SVG_PATHS = {
-    novice: '<circle cx="12" cy="12" r="9"/><polygon points="15.5 8.5 13.5 13.5 8.5 15.5 10.5 10.5 15.5 8.5"/>',
-    word_collector: '<path d="M12 6.5V20"/><path d="M2 5.5A2.5 2.5 0 0 1 4.5 3H12v17H4.5A2.5 2.5 0 0 1 2 17.5Z"/><path d="M22 5.5A2.5 2.5 0 0 0 19.5 3H12v17h7.5a2.5 2.5 0 0 0 2.5-2.5Z"/>',
-    vocabulary_scholar: '<path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12.5V17c0 1.7 2.7 3 6 3s6-1.3 6-3v-4.5"/>',
-    lexicon_tactician: '<circle cx="12" cy="8.5" r="5.5"/><path d="M9 13.5 7.5 21l4.5-2.5 4.5 2.5-1.5-7.5"/>',
-    master_learner: '<path d="M3 17h18l-1.5-9-4.5 4-3-6-3 6-4.5-4L3 17Z"/><path d="M4 20h16"/>',
-  };
-
-  function updateMasteryBadges() {
-    if (!badgesGrid || !CUETShared.getMasteryBadgeProgress) return;
-    const progress = CUETShared.getMasteryBadgeProgress(allEntries);
-    if (badgesSummary) {
-      const unit = progress.masteredCount === 1 ? 'word' : 'words';
-      badgesSummary.textContent = `${progress.unlockedCount} of ${progress.totalBadges} unlocked · ${progress.masteredCount} ${unit} mastered`;
+    if (guideSheetUrlInput && document.activeElement !== guideSheetUrlInput) {
+      guideSheetUrlInput.value = sheetWebhookUrl || '';
     }
-    if (badgesRankStatus) {
-      if (progress.currentBadge) {
-        badgesRankStatus.textContent = progress.nextBadge
-          ? `Current Rank: ${progress.currentBadge.title} · Next: ${progress.nextBadge.title} (${progress.nextBadge.remaining} more)`
-          : `Current Rank: ${progress.currentBadge.title} · Top tier reached`;
-      } else {
-        badgesRankStatus.textContent = 'Master 1 word to unlock Novice';
+
+    if (btnSheetPush) {
+      btnSheetPush.disabled = !connected || isSheetSyncBusy || allEntries.length === 0;
+      btnSheetPush.textContent = isSheetSyncBusy ? 'Syncing…' : 'Push to Sheet';
+    }
+    if (btnSheetPull) {
+      btnSheetPull.disabled = !connected || isSheetSyncBusy;
+      btnSheetPull.textContent = isSheetSyncBusy ? 'Syncing…' : 'Pull from Sheet';
+    }
+    if (btnBarSheetPush) {
+      btnBarSheetPush.disabled = isSheetSyncBusy || allEntries.length === 0;
+      btnBarSheetPush.textContent = isSheetSyncBusy ? 'Syncing…' : 'Push to Sheet';
+    }
+    if (btnBarSheetPull) {
+      btnBarSheetPull.disabled = isSheetSyncBusy;
+      btnBarSheetPull.textContent = isSheetSyncBusy ? 'Syncing…' : 'Pull from Sheet';
+    }
+    if (sheetSyncNote) {
+      sheetSyncNote.hidden = connected;
+      if (!connected) {
+        sheetSyncNote.textContent =
+          'Connect a Google Sheet in the Google Sheets Auto-Save card below (or Settings) to enable Push to Sheet & Pull from Sheet.';
       }
     }
+  }
+
+  btnToggleSheetsGuide.addEventListener('click', () => {
+    const isOpening = sheetsGuidePanel.hidden;
+    sheetsGuidePanel.hidden = !isOpening;
+    btnToggleSheetsGuide.setAttribute('aria-expanded', String(isOpening));
+  });
+
+  function downloadStarterTemplateCsv(category) {
+    const include = tplIncludeEntries ? Boolean(tplIncludeEntries.checked) : false;
+    const csv = CUETShared.buildTemplateCsv(category, allEntries, include);
+    const slug = category === 'idioms' ? 'idioms' : category === 'phrasalVerbs' ? 'phrasal-verbs' : 'words';
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+    triggerFileDownload(blob, `ipmat-cuet-template-${slug}.csv`);
+    showToast(`Downloaded ${CUETShared.SHEET_TABS[category]} starter CSV template.`, 'ok');
+  }
+
+  btnTplWords.addEventListener('click', () => downloadStarterTemplateCsv('vocabulary'));
+  btnTplIdioms.addEventListener('click', () => downloadStarterTemplateCsv('idioms'));
+  btnTplPhrasal.addEventListener('click', () => downloadStarterTemplateCsv('phrasalVerbs'));
+
+  btnGuideCopyScript.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(CUETShared.APPS_SCRIPT_TEMPLATE);
+      btnGuideCopyScript.textContent = 'Copied!';
+      setTimeout(() => {
+        btnGuideCopyScript.textContent = 'Copy Apps Script';
+      }, 1800);
+    } catch {
+      showSheetsInlineStatus('Could not copy automatically — select and copy the script box below.', 'neutral');
+    }
+  });
+
+  sheetsConnectForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const rawUrl = guideSheetUrlInput.value.trim();
+    const validation = CUETShared.validateAppsScriptUrlInput(rawUrl);
+    if (!validation.ok) {
+      showSheetsInlineStatus(validation.error, 'error');
+      guideSheetUrlInput.focus();
+      return;
+    }
+
+    btnGuideConnect.disabled = true;
+    btnGuideConnect.textContent = 'Testing…';
+    showSheetsInlineStatus('Testing connection with your Google Apps Script Web App…', 'neutral');
+
+    try {
+      const testRes = await sendMessage({
+        type: 'TEST_SHEET_CONNECTION',
+        payload: { sheetWebhookUrl: validation.url },
+      });
+      if (!testRes || !testRes.ok) {
+        showSheetsInlineStatus((testRes && testRes.error) || 'Could not connect to Google Sheet.', 'error');
+        return;
+      }
+
+      const saveRes = await sendMessage({
+        type: 'SAVE_SHEET_WEBHOOK',
+        payload: { sheetWebhookUrl: validation.url },
+      });
+      if (saveRes && saveRes.ok) {
+        sheetWebhookUrl = saveRes.sheetWebhookUrl;
+        hasSheetWebhook = Boolean(sheetWebhookUrl);
+        updateSheetSyncControls();
+        showSheetsInlineStatus(
+          'Connected! New entries will auto-save into your Words, Idioms, and Phrasal Verbs tabs.',
+          'ok'
+        );
+        showToast('Google Sheets Auto-Save connected.', 'ok');
+      }
+    } catch (err) {
+      showSheetsInlineStatus('Connection test failed: ' + err.message, 'error');
+    } finally {
+      btnGuideConnect.disabled = false;
+      btnGuideConnect.textContent = 'Test & Connect';
+    }
+  });
+
+  btnBarSheetDisconnect.addEventListener('click', async () => {
+    try {
+      const res = await sendMessage({ type: 'SAVE_SHEET_WEBHOOK', payload: { sheetWebhookUrl: '' } });
+      if (res && res.ok) {
+        sheetWebhookUrl = '';
+        hasSheetWebhook = false;
+        updateSheetSyncControls();
+        showSheetsInlineStatus('Disconnected Google Sheet Auto-Save.', 'neutral');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  async function runPushToSheet() {
+    if (!hasSheetWebhook || isSheetSyncBusy) return;
+    isSheetSyncBusy = true;
+    updateSheetSyncControls();
+    showSheetsInlineStatus('Pushing local entries to Google Sheet…', 'neutral');
+    try {
+      const res = await sendMessage({ type: 'PUSH_TO_SHEET' });
+      if (res && res.ok) {
+        const added = res.addedCount || 0;
+        const skipped = res.skippedCount || 0;
+        const msg = `Pushed to Google Sheet: ${added} new ${added === 1 ? 'row' : 'rows'} added${
+          skipped > 0 ? `, ${skipped} already synced` : ''
+        }.`;
+        showSheetsInlineStatus(msg, 'ok');
+        showToast(msg, 'ok');
+      } else {
+        const errText = (res && res.error) || 'Could not push to Google Sheet.';
+        showSheetsInlineStatus(errText, 'error');
+        showToast(errText, 'error');
+      }
+    } catch (err) {
+      showSheetsInlineStatus(err.message, 'error');
+      showToast(err.message, 'error');
+    } finally {
+      isSheetSyncBusy = false;
+      updateSheetSyncControls();
+    }
+  }
+
+  async function runPullFromSheet() {
+    if (!hasSheetWebhook || isSheetSyncBusy) return;
+    isSheetSyncBusy = true;
+    updateSheetSyncControls();
+    showSheetsInlineStatus('Pulling rows from your Google Sheet…', 'neutral');
+    try {
+      const res = await sendMessage({ type: 'PULL_FROM_SHEET' });
+      if (res && res.ok) {
+        await loadState();
+        const added = res.addedCount || 0;
+        const updated = res.updatedCount || 0;
+        const msg =
+          added === 0 && updated === 0
+            ? 'Your Vocab Vault is already up to date with Google Sheets.'
+            : `Pulled from Google Sheet: ${added} added, ${updated} updated.`;
+        showSheetsInlineStatus(msg, 'ok');
+        showToast(msg, 'ok');
+      } else {
+        const errText = (res && res.error) || 'Could not pull from Google Sheet.';
+        showSheetsInlineStatus(errText, 'error');
+        showToast(errText, 'error');
+      }
+    } catch (err) {
+      showSheetsInlineStatus(err.message, 'error');
+      showToast(err.message, 'error');
+    } finally {
+      isSheetSyncBusy = false;
+      updateSheetSyncControls();
+    }
+  }
+
+  btnSheetPush.addEventListener('click', runPushToSheet);
+  btnSheetPull.addEventListener('click', runPullFromSheet);
+  btnBarSheetPush.addEventListener('click', runPushToSheet);
+  btnBarSheetPull.addEventListener('click', runPullFromSheet);
+
+  // ==================== Daily Goal ====================
+  function renderDailyGoal() {
+    const stats = CUETShared.computeDailyGoalStats(allEntries, dailyGoalTarget);
+    dailyStreakText.textContent = `🔥 ${stats.streakDays}d`;
+    dailyProgressText.textContent = stats.goalReached
+      ? `${stats.savedToday}/${stats.target} ✓`
+      : `${stats.savedToday}/${stats.target} today`;
+    btnDailyGoal.classList.toggle('is-reached', stats.goalReached);
+
+    dailyPopSub.textContent = stats.goalReached
+      ? `Daily goal reached! (${stats.savedToday}/${stats.target})`
+      : `${stats.savedToday} of ${stats.target} saved today`;
+    dailyPopStreak.textContent = `🔥 ${stats.streakDays} ${stats.streakDays === 1 ? 'day' : 'days'}`;
+    dailyPopFill.style.width = `${stats.progressPercent}%`;
+
+    if (document.activeElement !== dailyGoalInput) {
+      dailyGoalInput.value = String(stats.target);
+    }
+
+    if (prevDailyGoalReached === false && stats.goalReached) {
+      btnDailyGoal.classList.remove('is-celebrating');
+      void btnDailyGoal.offsetWidth;
+      btnDailyGoal.classList.add('is-celebrating');
+      if (dailyCelebrateTimer) clearTimeout(dailyCelebrateTimer);
+      dailyCelebrateTimer = setTimeout(() => {
+        btnDailyGoal.classList.remove('is-celebrating');
+      }, 2200);
+      showToast(`Daily goal reached! ${stats.savedToday}/${stats.target} saved today.`, 'ok');
+    }
+    prevDailyGoalReached = stats.goalReached;
+  }
+
+  btnDailyGoal.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpening = dailyGoalPopover.hidden;
+    dailyGoalPopover.hidden = !isOpening;
+    btnDailyGoal.setAttribute('aria-expanded', String(isOpening));
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!dailyGoalPopover.hidden && !dailyGoalWrap.contains(e.target)) {
+      dailyGoalPopover.hidden = true;
+      btnDailyGoal.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  dailyGoalForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const target = CUETShared.clampDailyGoal(dailyGoalInput.value);
+    try {
+      const res = await sendMessage({ type: 'SAVE_DAILY_GOAL', payload: { target } });
+      if (res && res.ok) {
+        dailyGoalTarget = res.dailyGoalTarget;
+        renderDailyGoal();
+        dailyGoalPopover.hidden = true;
+        btnDailyGoal.setAttribute('aria-expanded', 'false');
+        showToast(`Daily study goal updated to ${dailyGoalTarget} words/day.`, 'ok');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  // ==================== Mastery Progress & Badges ====================
+  function renderMasteryProgress() {
+    const stats = CUETShared.getMasteryStats(allEntries);
+    masteryCounts.textContent = `${stats.masteredCount} mastered · ${stats.learningCount} learning · ${stats.newCount} new`;
+    masteryPercent.textContent = `${stats.percentMastered}% Mastered`;
+    masteryProgressbar.setAttribute('aria-valuenow', String(stats.percentMastered));
+    masteryFillMastered.style.width = `${stats.percentMastered}%`;
+    masteryFillLearning.style.width = `${stats.percentLearning}%`;
+
+    const dueQueue = CUETShared.getDailyReviewQueue(allEntries, new Date());
+    if (dueQueue.totalDue > 0) {
+      dueTodayPill.hidden = false;
+      dueTodayPill.textContent = `${dueQueue.totalDue} Due`;
+    } else {
+      dueTodayPill.hidden = true;
+    }
+
+    const needsPracticeTotal = allEntries.filter((e) => CUETShared.isNeedsPractice(e)).length;
+    quickDueCount.textContent = String(dueQueue.totalDue);
+    quickPracticeCount.textContent = String(needsPracticeTotal);
+  }
+
+  function getBadgeSvg(badgeId) {
+    const common = 'width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+    switch (badgeId) {
+      case 'novice':
+        return `<svg ${common}><circle cx="12" cy="12" r="9"/><polygon points="15.5 8.5 13.5 13.5 8.5 15.5 10.5 10.5 15.5 8.5"/></svg>`;
+      case 'word_collector':
+        return `<svg ${common}><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v18H6.5A2.5 2.5 0 0 1 4 18.5z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v18h5.5a2.5 2.5 0 0 0 2.5-2.5z"/></svg>`;
+      case 'vocabulary_scholar':
+        return `<svg ${common}><path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5"/></svg>`;
+      case 'lexicon_tactician':
+        return `<svg ${common}><circle cx="12" cy="9" r="5"/><path d="M9 13.5 7.5 21 12 18.5 16.5 21 15 13.5"/></svg>`;
+      default:
+        return `<svg ${common}><path d="M3 18h18l-2-10-4.5 4L12 6l-2.5 6L5 8l-2 10z"/></svg>`;
+    }
+  }
+
+  function renderMasteryBadges() {
+    if (!badgesGrid) return;
+    const progress = CUETShared.getMasteryBadgeProgress(allEntries);
+    badgesSummary.textContent = `${progress.unlockedCount} of ${progress.totalBadges} unlocked · ${progress.masteredCount} ${progress.masteredCount === 1 ? 'word' : 'words'} mastered`;
+    badgesRankStatus.textContent = progress.nextBadge
+      ? `Master ${progress.nextBadge.remaining} more ${progress.nextBadge.remaining === 1 ? 'word' : 'words'} to unlock ${progress.nextBadge.title}`
+      : 'All 5 Mastery Badges unlocked';
 
     badgesGrid.innerHTML = '';
     for (const badge of progress.badges) {
-      const card = document.createElement('div');
-      card.className = 'badge-tile' + (badge.unlocked ? ' is-unlocked' : '');
-      card.setAttribute('role', 'listitem');
-      card.dataset.badgeId = badge.id;
-      card.dataset.unlocked = badge.unlocked ? 'true' : 'false';
+      const tile = document.createElement('div');
+      tile.className = 'badge-tile' + (badge.unlocked ? ' is-unlocked' : '');
+      tile.setAttribute('role', 'listitem');
+      tile.title = badge.description;
 
       const top = document.createElement('div');
       top.className = 'badge-top';
 
       const emblem = document.createElement('div');
       emblem.className = 'badge-emblem';
-      emblem.setAttribute('aria-hidden', 'true');
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', '0 0 24 24');
-      svg.setAttribute('width', '18');
-      svg.setAttribute('height', '18');
-      svg.setAttribute('fill', 'none');
-      svg.setAttribute('stroke', 'currentColor');
-      svg.setAttribute('stroke-width', '2');
-      svg.setAttribute('stroke-linecap', 'round');
-      svg.setAttribute('stroke-linejoin', 'round');
-      svg.innerHTML = BADGE_SVG_PATHS[badge.id] || BADGE_SVG_PATHS.novice;
-      emblem.appendChild(svg);
+      emblem.innerHTML = getBadgeSvg(badge.id);
 
       const info = document.createElement('div');
       info.className = 'badge-info';
-      const titleEl = document.createElement('p');
-      titleEl.className = 'badge-title';
-      titleEl.textContent = badge.title;
-      const reqEl = document.createElement('p');
-      reqEl.className = 'badge-req';
-      reqEl.textContent = `${badge.threshold} ${badge.threshold === 1 ? 'word' : 'words'} mastered`;
-      info.appendChild(titleEl);
-      info.appendChild(reqEl);
-
+      const title = document.createElement('h3');
+      title.className = 'badge-title';
+      title.textContent = badge.title;
+      const req = document.createElement('p');
+      req.className = 'badge-req';
+      req.textContent = `${badge.threshold} ${badge.threshold === 1 ? 'word' : 'words'} mastered`;
+      info.appendChild(title);
+      info.appendChild(req);
       top.appendChild(emblem);
       top.appendChild(info);
 
@@ -337,70 +876,49 @@
       foot.className = 'badge-foot';
       const meta = document.createElement('div');
       meta.className = 'badge-meta';
-      const statusSpan = document.createElement('span');
-      statusSpan.className = 'badge-state';
-      statusSpan.textContent = badge.unlocked
-        ? 'Unlocked'
-        : progress.nextBadge && progress.nextBadge.id === badge.id
-        ? 'In Progress'
-        : 'Locked';
+      const stateSpan = document.createElement('span');
+      stateSpan.className = 'badge-state';
+      stateSpan.textContent = badge.unlocked ? 'Unlocked' : progress.nextBadge && progress.nextBadge.id === badge.id ? 'In Progress' : 'Locked';
       const countSpan = document.createElement('span');
       countSpan.textContent = `${Math.min(progress.masteredCount, badge.threshold)}/${badge.threshold}`;
-      meta.appendChild(statusSpan);
+      meta.appendChild(stateSpan);
       meta.appendChild(countSpan);
 
-      const bar = document.createElement('div');
-      bar.className = 'badge-track';
+      const track = document.createElement('div');
+      track.className = 'badge-track';
       const fill = document.createElement('div');
       fill.className = 'badge-fill';
       fill.style.width = `${badge.progressPercent}%`;
-      bar.appendChild(fill);
+      track.appendChild(fill);
 
       foot.appendChild(meta);
-      foot.appendChild(bar);
-
-      card.appendChild(top);
-      card.appendChild(foot);
-      badgesGrid.appendChild(card);
+      foot.appendChild(track);
+      tile.appendChild(top);
+      tile.appendChild(foot);
+      badgesGrid.appendChild(tile);
     }
   }
 
-  function canSpeakExpression() {
-    return typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
-  }
-
-  function speakExpression(text) {
-    if (!canSpeakExpression() || !text || !text.trim()) return;
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text.trim());
-      utterance.lang = 'en-IN';
-      utterance.rate = 0.95;
-      window.speechSynthesis.speak(utterance);
-    } catch {
-      // Ignore speech synthesis errors cleanly
-    }
-  }
-
+  // ==================== Insights ====================
   function renderInsights() {
-    if (!insightsPanel || !insightsKpis || !insightCatBars || !insightMasteryBars) return;
+    if (!insightsPanel) return;
     insightsPanel.hidden = !showInsights;
     if (btnToggleInsights) {
-      btnToggleInsights.textContent = showInsights ? 'Hide Insights' : 'Insights';
-      btnToggleInsights.setAttribute('aria-expanded', showInsights ? 'true' : 'false');
+      btnToggleInsights.textContent = showInsights ? 'Hide Insights' : 'Show Insights';
+      btnToggleInsights.setAttribute('aria-expanded', String(showInsights));
     }
     if (!showInsights) return;
 
-    const catData = CUETShared.getCategoryInsightData(allEntries);
-    const masteryData = CUETShared.getMasteryDistributionData(allEntries);
     const stats = CUETShared.getMasteryStats(allEntries);
+    const catData = CUETShared.getCategoryInsightData(allEntries);
+    const distData = CUETShared.getMasteryDistributionData(allEntries);
 
     insightsKpis.innerHTML = '';
     const kpis = [
-      { label: 'Total Saved', value: String(stats.total) },
-      { label: 'Mastered', value: String(stats.masteredCount) },
-      { label: 'Learning', value: String(stats.learningCount) },
-      { label: 'New', value: String(stats.newCount) },
+      { label: 'Total Saved', value: stats.total },
+      { label: 'Mastered', value: stats.masteredCount },
+      { label: 'Learning', value: stats.learningCount },
+      { label: 'New', value: stats.newCount },
     ];
     for (const k of kpis) {
       const box = document.createElement('div');
@@ -410,125 +928,388 @@
       lbl.textContent = k.label;
       const val = document.createElement('div');
       val.className = 'insight-kpi-val';
-      val.textContent = k.value;
+      val.textContent = String(k.value);
       box.appendChild(lbl);
       box.appendChild(val);
       insightsKpis.appendChild(box);
     }
 
-    if (insightCatTitle) {
-      insightCatTitle.textContent =
-        insightsMetric === 'mastered' ? 'Learned (Mastered) per Category' : 'Total Saved per Category';
-    }
+    insightCatTitle.textContent =
+      insightsMetric === 'mastered' ? 'Learned (Mastered) per Category' : 'Total Saved per Category';
 
-    const maxCat = Math.max(
-      1,
-      ...catData.map((d) => (insightsMetric === 'mastered' ? d.mastered : d.total))
-    );
+    const maxTotal = Math.max(1, ...catData.map((d) => d.total));
     insightCatBars.innerHTML = '';
-    for (const item of catData) {
-      const val = insightsMetric === 'mastered' ? item.mastered : item.total;
-      const pct = Math.round((val / maxCat) * 100);
+    for (const d of catData) {
       const row = document.createElement('div');
       row.className = 'insight-bar-row';
       const meta = document.createElement('div');
       meta.className = 'insight-bar-meta';
-      const nameSpan = document.createElement('span');
-      nameSpan.textContent = item.label;
-      const valStrong = document.createElement('strong');
-      valStrong.textContent =
-        insightsMetric === 'mastered' ? `${item.mastered} / ${item.total}` : String(item.total);
-      meta.appendChild(nameSpan);
-      meta.appendChild(valStrong);
+      const name = document.createElement('span');
+      name.textContent = d.label;
+      const num = document.createElement('strong');
+      num.textContent = insightsMetric === 'mastered' ? `${d.mastered} / ${d.total}` : String(d.total);
+      meta.appendChild(name);
+      meta.appendChild(num);
+
       const track = document.createElement('div');
       track.className = 'insight-bar-track';
       const fill = document.createElement('div');
-      fill.className = 'insight-bar-fill is-mastered';
+      fill.className = 'insight-bar-fill';
+      const pct = insightsMetric === 'mastered' ? d.percentMastered : Math.round((d.total / maxTotal) * 100);
       fill.style.width = `${pct}%`;
       track.appendChild(fill);
+
       row.appendChild(meta);
       row.appendChild(track);
       insightCatBars.appendChild(row);
     }
 
-    const maxMastery = Math.max(1, ...masteryData.map((d) => d.count));
     insightMasteryBars.innerHTML = '';
-    for (const item of masteryData) {
-      const pct = Math.round((item.count / maxMastery) * 100);
+    for (const d of distData) {
       const row = document.createElement('div');
       row.className = 'insight-bar-row';
       const meta = document.createElement('div');
       meta.className = 'insight-bar-meta';
-      const nameSpan = document.createElement('span');
-      nameSpan.textContent = item.label;
-      const valStrong = document.createElement('strong');
-      valStrong.textContent = `${item.count} (${item.percent}%)`;
-      meta.appendChild(nameSpan);
-      meta.appendChild(valStrong);
+      const name = document.createElement('span');
+      name.textContent = d.label;
+      const num = document.createElement('strong');
+      num.textContent = `${d.count} (${d.percent}%)`;
+      meta.appendChild(name);
+      meta.appendChild(num);
+
       const track = document.createElement('div');
       track.className = 'insight-bar-track';
       const fill = document.createElement('div');
-      fill.className = `insight-bar-fill is-${item.level}`;
-      fill.style.width = `${pct}%`;
+      fill.className = `insight-bar-fill is-${d.level}`;
+      fill.style.width = `${d.percent}%`;
       track.appendChild(fill);
+
       row.appendChild(meta);
       row.appendChild(track);
       insightMasteryBars.appendChild(row);
     }
   }
 
-  function renderEntries() {
-    updateTabCounts();
-    updateMasteryProgress();
-    updateMasteryBadges();
+  btnToggleInsights.addEventListener('click', () => {
+    showInsights = !showInsights;
     renderInsights();
-    updateDailyGoalUi();
-    if (isStudyMode) {
-      renderStudyMode();
-    }
-    if (isQuizMode) {
-      renderQuizMode();
-    }
-    const categoryTotal = allEntries.filter((e) => e.category === activeTab).length;
-    const visible = getFilteredEntries();
-    if (btnClearSearch) {
-      btnClearSearch.hidden = !searchQuery.trim();
-    }
-    if (searchMeta) {
-      const isFiltering = Boolean(searchQuery.trim()) || statusFilter !== 'all';
-      searchMeta.hidden = !isFiltering;
-      if (isFiltering) {
-        searchMeta.textContent = `Showing ${visible.length} of ${categoryTotal} in ${CUETShared.CATEGORIES[activeTab]}`;
+  });
+
+  btnInsightsMastered.addEventListener('click', () => {
+    insightsMetric = 'mastered';
+    btnInsightsMastered.className = 'mastery-opt is-active is-mastered';
+    btnInsightsMastered.setAttribute('aria-pressed', 'true');
+    btnInsightsAll.className = 'mastery-opt';
+    btnInsightsAll.setAttribute('aria-pressed', 'false');
+    renderInsights();
+  });
+
+  btnInsightsAll.addEventListener('click', () => {
+    insightsMetric = 'all';
+    btnInsightsAll.className = 'mastery-opt is-active is-mastered';
+    btnInsightsAll.setAttribute('aria-pressed', 'true');
+    btnInsightsMastered.className = 'mastery-opt';
+    btnInsightsMastered.setAttribute('aria-pressed', 'false');
+    renderInsights();
+  });
+
+  // ==================== Source Dropdown & Filtering ====================
+  function renderSourceDropdown() {
+    const sources = CUETShared.getUniqueSources(allEntries);
+    const currentVal = sourceFilter;
+    sourceSelect.innerHTML = '<option value="all">All sources</option>';
+    let stillExists = currentVal === 'all';
+    for (const s of sources) {
+      const opt = document.createElement('option');
+      opt.value = s.title;
+      opt.textContent = `${s.title} (${s.count})`;
+      sourceSelect.appendChild(opt);
+      if (s.title.toLowerCase() === currentVal.toLowerCase()) {
+        stillExists = true;
       }
     }
+    if (!stillExists) {
+      sourceFilter = 'all';
+    }
+    sourceSelect.value = sourceFilter;
+  }
+
+  function updateQuickFilterUI() {
+    btnQuickDue.setAttribute('aria-pressed', String(statusFilter === 'dueToday'));
+    btnQuickPractice.setAttribute('aria-pressed', String(statusFilter === 'needsPractice'));
+    filterSelect.value = statusFilter;
+    sourceSelect.value = sourceFilter;
+    sortSelect.value = sortOrder;
+    const hasActiveFilter =
+      Boolean(searchQuery.trim()) ||
+      statusFilter !== 'all' ||
+      sourceFilter !== 'all' ||
+      sortOrder !== 'recent';
+    btnResetFilters.hidden = !hasActiveFilter;
+  }
+
+  function getFilteredEntries() {
+    const q = searchQuery.trim().toLowerCase();
+    const now = new Date();
+    let list =
+      activeTab === 'all' || q
+        ? [...allEntries]
+        : allEntries.filter((e) => e.category === activeTab);
+
+    if (statusFilter === 'favourites') {
+      list = list.filter((e) => e.favourite);
+    } else if (statusFilter === 'dueToday') {
+      list = list.filter((e) => CUETShared.getEntryReviewSchedule(e, now).isDueToday);
+    } else if (statusFilter === 'needsPractice') {
+      list = list.filter((e) => CUETShared.isNeedsPractice(e));
+    } else if (statusFilter !== 'all') {
+      list = list.filter((e) => CUETShared.getMasteryLevel(e) === statusFilter);
+    }
+
+    if (sourceFilter && sourceFilter !== 'all') {
+      const target = sourceFilter.trim().toLowerCase();
+      list = list.filter((e) => String(e.sourceTitle || '').trim().toLowerCase() === target);
+    }
+
+    if (q) {
+      list = list.filter(
+        (e) =>
+          (e.expression || '').toLowerCase().includes(q) ||
+          (e.meaning || '').toLowerCase().includes(q) ||
+          (e.example || '').toLowerCase().includes(q) ||
+          (e.contextSentence || '').toLowerCase().includes(q) ||
+          (e.sourceTitle || '').toLowerCase().includes(q)
+      );
+    }
+
+    if (sortOrder === 'az') {
+      list.sort((a, b) => a.expression.localeCompare(b.expression, undefined, { sensitivity: 'base' }));
+    } else if (sortOrder === 'za') {
+      list.sort((a, b) => b.expression.localeCompare(a.expression, undefined, { sensitivity: 'base' }));
+    } else if (sortOrder === 'mostMissed') {
+      list.sort((a, b) => {
+        const diff = CUETShared.getMissCount(b) - CUETShared.getMissCount(a);
+        if (diff !== 0) return diff;
+        return Date.parse(b.dateAdded || '') - Date.parse(a.dateAdded || '');
+      });
+    } else {
+      list.sort((a, b) => Date.parse(b.dateAdded || '') - Date.parse(a.dateAdded || ''));
+    }
+
+    return list;
+  }
+
+  // ==================== Bulk Multi-Select ====================
+  function pruneSelectedIds() {
+    const valid = new Set(allEntries.map((e) => e.id));
+    for (const id of Array.from(selectedIds)) {
+      if (!valid.has(id)) selectedIds.delete(id);
+    }
+  }
+
+  function renderBulkBar() {
+    pruneSelectedIds();
+    const count = selectedIds.size;
+    btnSelectMode.setAttribute('aria-pressed', String(isSelectMode));
+    btnSelectMode.classList.toggle('is-active-panel', isSelectMode);
+    btnSelectMode.textContent = isSelectMode ? `Done Selecting (${count})` : 'Select';
+
+    bulkBar.hidden = !isSelectMode;
+    if (!isSelectMode) return;
+
+    bulkCountLabel.textContent = `${count} selected`;
+    const hasSelection = count > 0;
+    btnBulkClear.disabled = !hasSelection;
+    btnBulkMastered.disabled = !hasSelection;
+    btnBulkLearning.disabled = !hasSelection;
+    bulkMoveSelect.disabled = !hasSelection;
+    btnBulkPdf.disabled = !hasSelection;
+    btnBulkAnki.disabled = !hasSelection;
+    btnBulkDelete.disabled = !hasSelection;
+  }
+
+  btnSelectMode.addEventListener('click', () => {
+    isSelectMode = !isSelectMode;
+    if (!isSelectMode) selectedIds.clear();
+    renderBulkBar();
+    renderEntries();
+  });
+
+  btnBulkSelectAll.addEventListener('click', () => {
+    const visible = getFilteredEntries();
+    for (const e of visible) selectedIds.add(e.id);
+    renderBulkBar();
+    renderEntries();
+  });
+
+  btnBulkClear.addEventListener('click', () => {
+    selectedIds.clear();
+    renderBulkBar();
+    renderEntries();
+  });
+
+  async function runBulkPatch(patch, label) {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    try {
+      const res = await sendMessage({
+        type: 'BULK_UPDATE_ENTRIES',
+        payload: { ids, patch },
+      });
+      if (res && res.ok) {
+        selectedIds.clear();
+        await loadState();
+        showToast(`Updated ${res.updatedCount || ids.length} entries (${label}).`, 'ok');
+      } else {
+        showToast((res && res.error) || 'Bulk update failed.', 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  btnBulkMastered.addEventListener('click', () => runBulkPatch({ masteryLevel: 'mastered' }, 'Mastered'));
+  btnBulkLearning.addEventListener('click', () => runBulkPatch({ masteryLevel: 'learning' }, 'Learning'));
+
+  bulkMoveSelect.addEventListener('change', async () => {
+    const cat = bulkMoveSelect.value;
+    bulkMoveSelect.value = '';
+    if (!cat) return;
+    await runBulkPatch({ category: cat }, `moved to ${CUETShared.CATEGORIES[cat] || cat}`);
+  });
+
+  btnBulkPdf.addEventListener('click', () => {
+    const chosen = allEntries.filter((e) => selectedIds.has(e.id));
+    if (chosen.length === 0) return;
+    try {
+      const pdf = CUETShared.buildPdfStudySheetBytes(chosen, {
+        category: 'all',
+        sortOrder: 'az',
+        customLabel: `Selected Subset (${chosen.length} ${chosen.length === 1 ? 'entry' : 'entries'})`,
+      });
+      const blob = new Blob([pdf.bytes], { type: 'application/pdf' });
+      triggerFileDownload(blob, pdf.filename);
+      showToast(`Exported ${pdf.entryCount} selected entries to PDF.`, 'ok');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  btnBulkAnki.addEventListener('click', () => {
+    const chosen = allEntries.filter((e) => selectedIds.has(e.id));
+    if (chosen.length === 0) return;
+    const tsv = CUETShared.buildAnkiTsv(chosen);
+    const blob = new Blob(['\uFEFF' + tsv], { type: 'text/tab-separated-values;charset=utf-8' });
+    const stamp = new Date().toISOString().slice(0, 10);
+    triggerFileDownload(blob, `ipmat-cuet-anki-selected-${stamp}.tsv`);
+    showToast(`Exported ${chosen.length} selected entries to Anki (.tsv).`, 'ok');
+  });
+
+  btnBulkDelete.addEventListener('click', async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    const deletedEntries = allEntries.filter((e) => selectedIds.has(e.id));
+    try {
+      const res = await sendMessage({ type: 'DELETE_ENTRIES', payload: { ids } });
+      if (res && res.ok) {
+        selectedIds.clear();
+        await loadState();
+        showToast(
+          `Deleted ${deletedEntries.length} ${deletedEntries.length === 1 ? 'entry' : 'entries'}.`,
+          'undo',
+          { undoEntries: deletedEntries }
+        );
+      } else {
+        showToast((res && res.error) || 'Could not delete selected entries.', 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  // ==================== Tabs & Entries List ====================
+  function updateCounts() {
+    const counts = CUETShared.getCategoryCounts(allEntries);
+    if (tabCounts.all) tabCounts.all.textContent = String(counts.total);
+    tabCounts.vocabulary.textContent = String(counts.vocabulary);
+    tabCounts.idioms.textContent = String(counts.idioms);
+    tabCounts.phrasalVerbs.textContent = String(counts.phrasalVerbs);
+  }
+
+  function renderEntries() {
+    const items = getFilteredEntries();
     entriesList.innerHTML = '';
 
-    if (visible.length === 0) {
+    const trimmedQuery = searchQuery.trim();
+    if (btnClearSearch) {
+      btnClearSearch.hidden = !trimmedQuery;
+    }
+
+    if (searchMeta) {
+      if (trimmedQuery || statusFilter !== 'all' || sourceFilter !== 'all') {
+        searchMeta.hidden = false;
+        const parts = [`Showing ${items.length} matching ${items.length === 1 ? 'entry' : 'entries'}`];
+        if (trimmedQuery) parts.push(`for "${trimmedQuery}"`);
+        if (sourceFilter !== 'all') parts.push(`from ${sourceFilter}`);
+        searchMeta.textContent = parts.join(' ');
+      } else {
+        searchMeta.hidden = true;
+      }
+    }
+
+    if (items.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'empty-state';
-
       const title = document.createElement('p');
       title.className = 'empty-state-title';
-      title.textContent = searchQuery || statusFilter !== 'all'
-        ? 'No matching entries'
-        : `No ${CUETShared.CATEGORIES[activeTab].toLowerCase()} saved yet`;
-
       const desc = document.createElement('p');
       desc.className = 'empty-state-desc';
-      desc.textContent = searchQuery || statusFilter !== 'all'
-        ? 'Try clearing your search or changing the status filter.'
-        : 'Select text on any article, right-click "Save to IPMAT/CUET VOCAB BUILDER", or click "Add Entries" above to start building your list.';
 
+      if (trimmedQuery || statusFilter !== 'all' || sourceFilter !== 'all') {
+        title.textContent = 'No matching entries';
+        desc.textContent = 'Try adjusting or clearing your search query, mastery level, or source filter.';
+      } else {
+        const label = activeTab === 'all' ? 'THE VOCAB VAULT' : CUETShared.CATEGORIES[activeTab];
+        title.textContent = `No entries in ${label} yet`;
+        desc.textContent =
+          'Select any expression on a webpage and click "Add to Vocab Vault", or use "Add Entries" above.';
+      }
       empty.appendChild(title);
       empty.appendChild(desc);
       entriesList.appendChild(empty);
       return;
     }
 
-    for (const entry of visible) {
-      const mastery = CUETShared.getMasteryLevel(entry);
-      const article = document.createElement('article');
-      article.className = 'entry-row' + (mastery === 'mastered' ? ' is-learned' : '');
+    const now = new Date();
+    for (const entry of items) {
+      const level = CUETShared.getMasteryLevel(entry);
+      const schedule = CUETShared.getEntryReviewSchedule(entry, now);
+      const misses = CUETShared.getMissCount(entry);
+      const isChecked = selectedIds.has(entry.id);
+
+      const row = document.createElement('article');
+      row.className =
+        'entry-row' +
+        (level === 'mastered' ? ' is-learned' : '') +
+        (isSelectMode && isChecked ? ' is-selected' : '');
+
+      if (isSelectMode) {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'entry-checkbox';
+        cb.checked = isChecked;
+        cb.setAttribute('aria-label', `Select ${entry.expression}`);
+        cb.addEventListener('change', () => {
+          if (cb.checked) selectedIds.add(entry.id);
+          else selectedIds.delete(entry.id);
+          renderBulkBar();
+          row.classList.toggle('is-selected', cb.checked);
+        });
+        row.appendChild(cb);
+      }
+
+      const contentWrap = document.createElement('div');
+      contentWrap.className = 'entry-content';
 
       const top = document.createElement('div');
       top.className = 'entry-top';
@@ -536,379 +1317,1000 @@
       const headingGroup = document.createElement('div');
       headingGroup.className = 'entry-heading-group';
 
-      const h3 = document.createElement('h3');
-      h3.className = 'entry-expression';
-      h3.textContent = entry.expression;
-      headingGroup.appendChild(h3);
+      const heading = document.createElement('h3');
+      heading.className = 'entry-expression';
+      heading.textContent = entry.expression;
+      headingGroup.appendChild(heading);
 
-      if (canSpeakExpression()) {
-        const speakBtn = document.createElement('button');
-        speakBtn.type = 'button';
-        speakBtn.className = 'row-action-chip';
-        speakBtn.setAttribute('aria-label', `Pronounce ${entry.expression}`);
-        speakBtn.textContent = 'Listen';
-        speakBtn.addEventListener('click', () => speakExpression(entry.expression));
-        headingGroup.appendChild(speakBtn);
+      if (activeTab === 'all' || trimmedQuery) {
+        const catTag = document.createElement('span');
+        catTag.className = 'entry-tag';
+        catTag.textContent = CUETShared.CATEGORY_SINGULAR[entry.category] || 'Word';
+        headingGroup.appendChild(catTag);
+      }
+
+      if (schedule.isDueToday) {
+        const dueTag = document.createElement('span');
+        dueTag.className = 'entry-tag is-due';
+        dueTag.textContent = schedule.scheduleLabel;
+        headingGroup.appendChild(dueTag);
+      }
+
+      if (misses > 0) {
+        const missTag = document.createElement('span');
+        missTag.className = 'entry-tag is-miss';
+        missTag.textContent = `Missed ${misses}×`;
+        headingGroup.appendChild(missTag);
+      }
+
+      if (entry.sourceTitle && entry.sourceTitle.trim()) {
+        const srcBtn = document.createElement('button');
+        srcBtn.type = 'button';
+        srcBtn.className = 'source-tag-btn';
+        srcBtn.textContent = entry.sourceTitle.trim();
+        srcBtn.title = `Filter vault by "${entry.sourceTitle.trim()}"`;
+        srcBtn.addEventListener('click', () => {
+          sourceFilter = entry.sourceTitle.trim();
+          updateQuickFilterUI();
+          renderEntries();
+        });
+        headingGroup.appendChild(srcBtn);
       }
 
       const meta = document.createElement('div');
       meta.className = 'entry-meta';
-
-      const dateSpan = document.createElement('span');
-      dateSpan.textContent = CUETShared.formatDate(entry.dateAdded);
-      meta.appendChild(dateSpan);
-
-      const sep1 = document.createElement('span');
-      sep1.textContent = ' · ';
-      sep1.setAttribute('aria-hidden', 'true');
-      meta.appendChild(sep1);
-
-      const statusSpan = document.createElement('span');
-      statusSpan.textContent = CUETShared.MASTERY_LABELS[mastery];
-      if (mastery === 'mastered') statusSpan.className = 'meta-learned';
-      else if (mastery === 'learning') statusSpan.className = 'meta-learning';
-      meta.appendChild(statusSpan);
-
-      if (entry.favourite) {
-        const sep2 = document.createElement('span');
-        sep2.textContent = ' · ';
-        sep2.setAttribute('aria-hidden', 'true');
-        meta.appendChild(sep2);
-
-        const favSpan = document.createElement('span');
-        favSpan.textContent = 'Favourite';
-        favSpan.className = 'meta-fav';
-        meta.appendChild(favSpan);
+      const metaParts = [];
+      if (level === 'mastered') {
+        const s = document.createElement('span');
+        s.className = 'meta-learned';
+        s.textContent = 'Mastered';
+        metaParts.push(s);
+      } else if (level === 'learning') {
+        const s = document.createElement('span');
+        s.className = 'meta-learning';
+        s.textContent = 'Learning';
+        metaParts.push(s);
       }
+      if (entry.favourite) {
+        const s = document.createElement('span');
+        s.className = 'meta-fav';
+        s.textContent = '★ Favourite';
+        metaParts.push(s);
+      }
+      if (!schedule.isDueToday) {
+        metaParts.push(document.createTextNode(schedule.scheduleLabel));
+      }
+      const dateStr = CUETShared.formatDate(entry.dateAdded);
+      if (dateStr) metaParts.push(document.createTextNode(dateStr));
+
+      metaParts.forEach((part, idx) => {
+        if (idx > 0) meta.appendChild(document.createTextNode(' · '));
+        meta.appendChild(part);
+      });
 
       top.appendChild(headingGroup);
       top.appendChild(meta);
-      article.appendChild(top);
 
-      // Clean study view: ONLY Meaning and Example (context sentence stays internal)
       const body = document.createElement('div');
       body.className = 'entry-body';
 
-      const meaningP = document.createElement('p');
-      meaningP.className = 'entry-line';
+      const meaningLine = document.createElement('p');
+      meaningLine.className = 'entry-line';
       const meaningStrong = document.createElement('strong');
       meaningStrong.textContent = 'Meaning: ';
-      meaningP.appendChild(meaningStrong);
-      meaningP.appendChild(document.createTextNode(entry.meaning));
+      meaningLine.appendChild(meaningStrong);
+      meaningLine.appendChild(document.createTextNode(entry.meaning));
 
-      const exampleP = document.createElement('p');
-      exampleP.className = 'entry-line';
+      const exampleLine = document.createElement('p');
+      exampleLine.className = 'entry-line';
       const exampleStrong = document.createElement('strong');
       exampleStrong.textContent = 'Example: ';
-      exampleP.appendChild(exampleStrong);
-      exampleP.appendChild(document.createTextNode(entry.example));
+      exampleLine.appendChild(exampleStrong);
+      exampleLine.appendChild(document.createTextNode(entry.example));
 
-      body.appendChild(meaningP);
-      body.appendChild(exampleP);
-      if (entry.sourceTitle) {
-        const sourceP = document.createElement('p');
-        sourceP.className = 'entry-meta';
-        sourceP.style.marginTop = '4px';
-        const sourceStrong = document.createElement('strong');
-        sourceStrong.textContent = 'Source: ';
-        sourceP.appendChild(sourceStrong);
-        sourceP.appendChild(document.createTextNode(entry.sourceTitle));
-        body.appendChild(sourceP);
-      }
-      article.appendChild(body);
+      body.appendChild(meaningLine);
+      body.appendChild(exampleLine);
 
-      // Action controls
       const actions = document.createElement('div');
       actions.className = 'entry-actions';
 
-      const masteryGroup = document.createElement('div');
-      masteryGroup.className = 'mastery-toggle';
-      masteryGroup.setAttribute('role', 'group');
-      masteryGroup.setAttribute('aria-label', `Mastery level for ${entry.expression}`);
+      // Mastery toggle
+      const masteryToggle = document.createElement('div');
+      masteryToggle.className = 'mastery-toggle';
+      masteryToggle.setAttribute('role', 'group');
+      masteryToggle.setAttribute('aria-label', `Mastery level for ${entry.expression}`);
 
-      for (const level of CUETShared.VALID_MASTERY_LEVELS) {
-        const levelBtn = document.createElement('button');
-        levelBtn.type = 'button';
-        const isCurrent = mastery === level;
-        levelBtn.className = 'mastery-opt' + (isCurrent ? ` is-active is-${level}` : '');
-        levelBtn.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
-        levelBtn.textContent = CUETShared.MASTERY_LABELS[level];
-        levelBtn.addEventListener('click', () => {
-          if (mastery !== level) {
-            toggleField(entry.id, 'masteryLevel', level);
+      for (const lvl of CUETShared.VALID_MASTERY_LEVELS) {
+        const optBtn = document.createElement('button');
+        optBtn.type = 'button';
+        optBtn.className = 'mastery-opt' + (level === lvl ? ` is-active is-${lvl}` : '');
+        optBtn.textContent = CUETShared.MASTERY_LABELS[lvl];
+        optBtn.setAttribute('aria-pressed', level === lvl ? 'true' : 'false');
+        optBtn.addEventListener('click', () => {
+          if (level !== lvl) {
+            updateEntryField(entry.id, { masteryLevel: lvl, learned: lvl === 'mastered' });
           }
         });
-        masteryGroup.appendChild(levelBtn);
+        masteryToggle.appendChild(optBtn);
       }
 
-      const btnFav = document.createElement('button');
-      btnFav.type = 'button';
-      btnFav.className = 'row-action' + (entry.favourite ? ' is-fav' : '');
-      btnFav.textContent = entry.favourite ? 'Remove Favourite' : 'Favourite';
-      btnFav.addEventListener('click', () => toggleField(entry.id, 'favourite', !entry.favourite));
+      const listenBtn = createSpeakChip(entry.expression, `card-${entry.id}`);
 
-      const btnEdit = document.createElement('button');
-      btnEdit.type = 'button';
-      btnEdit.className = 'row-action';
-      btnEdit.textContent = 'Edit';
-      btnEdit.addEventListener('click', () => openEditModal(entry));
+      const favBtn = document.createElement('button');
+      favBtn.type = 'button';
+      favBtn.className = 'row-action' + (entry.favourite ? ' is-fav' : '');
+      favBtn.textContent = entry.favourite ? '★ Favourited' : 'Favourite';
+      favBtn.addEventListener('click', () => updateEntryField(entry.id, { favourite: !entry.favourite }));
 
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.className = 'row-action' + (copiedEntryId === entry.id ? ' is-active' : '');
+      copyBtn.textContent = copiedEntryId === entry.id ? 'Copied!' : 'Copy';
+      copyBtn.addEventListener('click', () => handleCopyEntry(entry));
+
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'row-action';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => openEditDialog(entry));
+
+      const reanalyseBtn = document.createElement('button');
+      reanalyseBtn.type = 'button';
+      reanalyseBtn.className = 'row-action';
       const isReanalysing = reanalysingIds.has(entry.id);
-      const btnReanalyse = document.createElement('button');
-      btnReanalyse.type = 'button';
-      btnReanalyse.className = 'row-action';
-      btnReanalyse.textContent = isReanalysing ? 'Reanalysing…' : 'Reanalyse';
-      btnReanalyse.disabled = isReanalysing;
-      btnReanalyse.addEventListener('click', () => reanalyseEntry(entry.id, entry.expression));
+      reanalyseBtn.textContent = isReanalysing ? 'Reanalysing…' : 'Reanalyse';
+      reanalyseBtn.disabled = isReanalysing;
+      reanalyseBtn.addEventListener('click', () => handleReanalyse(entry));
 
-      const btnDelete = document.createElement('button');
-      btnDelete.type = 'button';
-      btnDelete.className = 'row-action is-danger';
-      btnDelete.textContent = 'Delete';
-      btnDelete.addEventListener('click', () => {
-        openConfirm({
-          title: 'Delete Entry',
-          message: `Remove "${entry.expression}" from THE VOCAB VAULT? This cannot be undone.`,
-          confirmLabel: 'Delete Entry',
-          onConfirm: () => deleteEntry(entry.id, entry.expression),
-        });
-      });
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'row-action is-danger';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => handleImmediateDelete(entry));
 
-      const btnCopy = document.createElement('button');
-      btnCopy.type = 'button';
-      btnCopy.className = 'row-action' + (copiedEntryId === entry.id ? ' is-active' : '');
-      btnCopy.textContent = copiedEntryId === entry.id ? 'Copied ✓' : 'Copy';
-      btnCopy.setAttribute('aria-label', `Copy ${entry.expression}`);
-      btnCopy.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(CUETShared.formatEntryCopyText(entry));
-          copiedEntryId = entry.id;
+      actions.appendChild(masteryToggle);
+      actions.appendChild(listenBtn);
+      actions.appendChild(favBtn);
+      actions.appendChild(copyBtn);
+      actions.appendChild(editBtn);
+      actions.appendChild(reanalyseBtn);
+      actions.appendChild(deleteBtn);
+
+      contentWrap.appendChild(top);
+      contentWrap.appendChild(body);
+      contentWrap.appendChild(actions);
+      row.appendChild(contentWrap);
+      entriesList.appendChild(row);
+    }
+  }
+
+  async function handleCopyEntry(entry) {
+    const text = CUETShared.formatEntryCopyText(entry);
+    try {
+      await navigator.clipboard.writeText(text);
+      copiedEntryId = entry.id;
+      renderEntries();
+      setTimeout(() => {
+        if (copiedEntryId === entry.id) {
+          copiedEntryId = null;
           renderEntries();
-          setTimeout(() => {
-            if (copiedEntryId === entry.id) {
-              copiedEntryId = null;
-              renderEntries();
-            }
-          }, 1500);
-        } catch {
-          showToast('Clipboard access was blocked by the browser.', 'error');
         }
-      });
-
-      actions.appendChild(masteryGroup);
-      actions.appendChild(btnCopy);
-      actions.appendChild(btnFav);
-      actions.appendChild(btnEdit);
-      actions.appendChild(btnReanalyse);
-      actions.appendChild(btnDelete);
-      article.appendChild(actions);
-
-      entriesList.appendChild(article);
+      }, 1500);
+    } catch {
+      showToast('Could not access clipboard.', 'error');
     }
   }
 
-  async function loadState() {
+  async function updateEntryField(id, patch) {
     try {
-      const res = await sendMessage({ type: 'GET_STATE' });
+      const res = await sendMessage({ type: 'UPDATE_ENTRY', payload: { id, patch } });
       if (res && res.ok) {
-        allEntries = Array.isArray(res.entries) ? res.entries : [];
-        hasSheetWebhook = Boolean(res.hasSheetWebhook);
-        if (res.dailyGoalTarget != null) {
-          dailyGoalTarget = CUETShared.clampDailyGoal(res.dailyGoalTarget);
-        }
-        apiKeyBanner.hidden = Boolean(res.hasApiKey);
-        updateSheetSyncUi();
-        renderEntries();
-      }
-    } catch (err) {
-      showToast('Could not load library: ' + err.message, 'error');
-    }
-  }
-
-  async function toggleField(id, field, value) {
-    try {
-      const res = await sendMessage({
-        type: 'UPDATE_ENTRY',
-        payload: { id, patch: { [field]: value } },
-      });
-      if (res && res.ok && res.entry) {
-        allEntries = allEntries.map((e) => (e.id === id ? res.entry : e));
-        renderEntries();
+        await loadState();
       } else {
         showToast((res && res.error) || 'Could not update entry.', 'error');
       }
     } catch (err) {
-      showToast('Update failed: ' + err.message, 'error');
+      showToast(err.message, 'error');
     }
   }
 
-  async function reanalyseEntry(id, expression) {
-    reanalysingIds.add(id);
-    renderEntries();
+  async function handleImmediateDelete(entry) {
     try {
-      const res = await sendMessage({
-        type: 'REANALYSE_ENTRY',
-        payload: { id },
-      });
-      if (res && res.ok && res.entry) {
-        allEntries = allEntries.map((e) => (e.id === id ? res.entry : e));
-        showToast(`Reanalysed "${res.entry.expression}" with Gemini.`, 'ok');
-      } else {
-        showToast((res && res.error) || `Could not reanalyse "${expression}".`, 'error');
-      }
-    } catch (err) {
-      showToast('Reanalysis failed: ' + err.message, 'error');
-    } finally {
-      reanalysingIds.delete(id);
-      renderEntries();
-    }
-  }
-
-  async function deleteEntry(id, expression) {
-    try {
-      const res = await sendMessage({ type: 'DELETE_ENTRY', payload: { id } });
+      const res = await sendMessage({ type: 'DELETE_ENTRY', payload: { id: entry.id } });
       if (res && res.ok) {
-        allEntries = allEntries.filter((e) => e.id !== id);
-        renderEntries();
-        showToast(`Deleted "${expression}".`, 'ok');
+        selectedIds.delete(entry.id);
+        await loadState();
+        showToast(`Deleted "${entry.expression}".`, 'undo', { undoEntries: [entry] });
       } else {
         showToast((res && res.error) || 'Could not delete entry.', 'error');
       }
     } catch (err) {
-      showToast('Delete failed: ' + err.message, 'error');
+      showToast(err.message, 'error');
     }
   }
 
-  function openEditModal(entry) {
-    editId.value = entry.id;
-    editExpression.value = entry.expression;
-    editCategory.value = entry.category;
-    editMeaning.value = entry.meaning;
-    editExample.value = entry.example;
-    editError.hidden = true;
-    editDialog.showModal();
+  async function handleReanalyse(entry) {
+    reanalysingIds.add(entry.id);
+    renderEntries();
+    try {
+      const res = await sendMessage({ type: 'REANALYSE_ENTRY', payload: { id: entry.id } });
+      if (res && res.ok) {
+        showToast(`Updated meaning and example for "${res.entry.expression}".`, 'ok');
+        await loadState();
+      } else {
+        showToast((res && res.error) || 'Reanalysis failed.', 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      reanalysingIds.delete(entry.id);
+      renderEntries();
+    }
   }
 
-  editForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const id = editId.value;
-    const expr = editExpression.value.trim();
-    const meaning = editMeaning.value.trim();
-    const example = editExample.value.trim();
-    if (!expr || !meaning || !example) {
-      editError.textContent = 'Expression, meaning, and example sentence are required.';
-      editError.hidden = false;
+  // ==================== Study Mode (3D Flip + SRS Due Today + Mistake Tracking) ====================
+  function getEntryById(id) {
+    return allEntries.find((e) => e.id === id) || null;
+  }
+
+  function shuffleIds(ids) {
+    const arr = [...ids];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = arr[i];
+      arr[i] = arr[j];
+      arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  function startStudySession(scope, customIds, isMissed) {
+    studyScope = scope;
+    studyDeckSelect.value = scope;
+    studyMissedRound = Boolean(isMissed);
+    studyDeckIds = Array.isArray(customIds)
+      ? [...customIds]
+      : CUETShared.buildStudyDeck(allEntries, scope, new Date()).map((e) => e.id);
+    studyIndex = 0;
+    studyFlipped = false;
+    studyKnownIds = [];
+    studyNeedsReviewIds = [];
+    studyComplete = false;
+    renderStudyMode();
+  }
+
+  function openStudyMode() {
+    stopSpeech();
+    if (isQuizMode) closeQuizMode();
+    isStudyMode = true;
+    studyPanel.hidden = false;
+    libraryListView.hidden = true;
+    const dueQueue = CUETShared.getDailyReviewQueue(allEntries, new Date());
+    const defaultScope = dueQueue.totalDue > 0 ? 'dailyReview' : 'all';
+    startStudySession(defaultScope);
+  }
+
+  function closeStudyMode() {
+    stopSpeech();
+    isStudyMode = false;
+    studyPanel.hidden = true;
+    libraryListView.hidden = false;
+  }
+
+  function flipActiveCard(forceFlipped) {
+    const next = typeof forceFlipped === 'boolean' ? forceFlipped : !studyFlipped;
+    if (next === studyFlipped) return;
+    studyFlipped = next;
+    const inner = studyStage.querySelector('.flashcard-3d-inner');
+    if (inner) {
+      inner.classList.toggle('is-flipped', studyFlipped);
+      inner.setAttribute('data-flipped', String(studyFlipped));
+      const front = inner.querySelector('.flashcard-face-front');
+      const back = inner.querySelector('.flashcard-face-back');
+      if (front) front.setAttribute('aria-hidden', String(studyFlipped));
+      if (back) back.setAttribute('aria-hidden', String(!studyFlipped));
+    }
+  }
+
+  async function rateStudyCard(outcome) {
+    const currentId = studyDeckIds[studyIndex];
+    if (!currentId || !studyFlipped) return;
+
+    if (outcome === 'known') {
+      studyKnownIds.push(currentId);
+      await updateEntryField(currentId, { masteryLevel: 'mastered', learned: true, countAsReview: true });
+    } else {
+      studyNeedsReviewIds.push(currentId);
+      try {
+        await sendMessage({ type: 'RECORD_MISS', payload: { id: currentId } });
+        await loadState();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    if (studyIndex + 1 >= studyDeckIds.length) {
+      studyComplete = true;
+      studyFlipped = false;
+    } else {
+      studyIndex++;
+      studyFlipped = false;
+    }
+    renderStudyMode();
+  }
+
+  function renderStudyMode() {
+    if (!isStudyMode) return;
+    studyHeading.textContent = studyMissedRound ? 'Study Mode · Missed Cards' : 'Study Mode';
+    studyStage.innerHTML = '';
+
+    const activeDeck = studyDeckIds.map(getEntryById).filter(Boolean);
+
+    if (activeDeck.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'study-empty';
+      const title = document.createElement('p');
+      title.className = 'empty-state-title';
+      title.textContent =
+        studyScope === 'dailyReview'
+          ? 'All caught up for today!'
+          : 'No flashcards in this deck';
+      const desc = document.createElement('p');
+      desc.className = 'empty-state-desc';
+      desc.textContent =
+        studyScope === 'dailyReview'
+          ? 'Every scheduled spaced-repetition card has been reviewed today. Switch to All Collections to practice ahead.'
+          : 'Switch to All Collections or save more expressions first.';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'primary-btn';
+      btn.style.marginTop = '14px';
+      btn.textContent = 'Study All Collections';
+      btn.addEventListener('click', () => startStudySession('all'));
+      empty.appendChild(title);
+      empty.appendChild(desc);
+      if (allEntries.length > 0 && studyScope !== 'all') empty.appendChild(btn);
+      studyStage.appendChild(empty);
       return;
     }
 
-    try {
-      const res = await sendMessage({
-        type: 'UPDATE_ENTRY',
-        payload: {
-          id,
-          patch: {
-            expression: expr,
-            category: editCategory.value,
-            meaning,
-            example,
-          },
-        },
+    if (studyComplete) {
+      const wrap = document.createElement('div');
+      wrap.className = 'study-summary';
+      wrap.innerHTML = `
+        <p class="study-eyebrow">Session Complete</p>
+        <h3 class="study-summary-title">You reviewed ${activeDeck.length} ${activeDeck.length === 1 ? 'card' : 'cards'}</h3>
+        <div class="study-stats-grid">
+          <div class="study-stat-box is-known">
+            <div class="study-stat-num">${studyKnownIds.length}</div>
+            <div class="study-stat-label">Known (Mastered)</div>
+          </div>
+          <div class="study-stat-box is-review">
+            <div class="study-stat-num">${studyNeedsReviewIds.length}</div>
+            <div class="study-stat-label">Needs Review (1d)</div>
+          </div>
+        </div>
+      `;
+      const actions = document.createElement('div');
+      actions.className = 'study-summary-actions';
+
+      if (studyNeedsReviewIds.length > 0) {
+        const missedBtn = document.createElement('button');
+        missedBtn.type = 'button';
+        missedBtn.className = 'review-btn';
+        missedBtn.textContent = `Review ${studyNeedsReviewIds.length} Missed ${studyNeedsReviewIds.length === 1 ? 'Card' : 'Cards'}`;
+        missedBtn.addEventListener('click', () => startStudySession(studyScope, studyNeedsReviewIds, true));
+        actions.appendChild(missedBtn);
+      }
+
+      const restartBtn = document.createElement('button');
+      restartBtn.type = 'button';
+      restartBtn.className = 'primary-btn';
+      restartBtn.textContent = 'Study Again';
+      restartBtn.addEventListener('click', () => startStudySession(studyScope));
+
+      const backBtn = document.createElement('button');
+      backBtn.type = 'button';
+      backBtn.className = 'secondary-btn';
+      backBtn.textContent = 'Back to Vault';
+      backBtn.addEventListener('click', closeStudyMode);
+
+      actions.appendChild(restartBtn);
+      actions.appendChild(backBtn);
+      wrap.appendChild(actions);
+      studyStage.appendChild(wrap);
+      return;
+    }
+
+    const safeIdx = Math.min(studyIndex, activeDeck.length - 1);
+    const card = activeDeck[safeIdx];
+    const level = CUETShared.getMasteryLevel(card);
+    const intervals = CUETShared.previewReviewIntervals(card);
+    const pct = Math.round(((safeIdx + 1) / activeDeck.length) * 100);
+
+    const progressMeta = document.createElement('div');
+    progressMeta.className = 'study-progress-meta';
+    progressMeta.innerHTML = `<span>Card ${safeIdx + 1} of ${activeDeck.length}</span><span>Known: ${studyKnownIds.length} · Review: ${studyNeedsReviewIds.length}</span>`;
+
+    const progressTrack = document.createElement('div');
+    progressTrack.className = 'study-progress-track';
+    const progressFill = document.createElement('div');
+    progressFill.className = 'study-progress-fill';
+    progressFill.style.width = `${pct}%`;
+    progressTrack.appendChild(progressFill);
+
+    const scene = document.createElement('div');
+    scene.className = 'flashcard-scene';
+
+    const inner = document.createElement('div');
+    inner.className = 'flashcard-3d-inner' + (studyFlipped ? ' is-flipped' : '');
+    inner.setAttribute('data-flipped', String(studyFlipped));
+
+    // FRONT FACE (Signature Midnight Navy)
+    const frontFace = document.createElement('div');
+    frontFace.className = 'flashcard flashcard-face flashcard-face-front';
+    frontFace.setAttribute('aria-hidden', String(studyFlipped));
+    frontFace.addEventListener('click', () => {
+      if (!studyFlipped) flipActiveCard(true);
+    });
+
+    const frontMeta = document.createElement('div');
+    frontMeta.className = 'flashcard-meta';
+    const frontLeft = document.createElement('span');
+    frontLeft.textContent = `${CUETShared.CATEGORIES[card.category] || 'Vocabulary'} · ${CUETShared.MASTERY_LABELS[level]}`;
+    const frontRight = createSpeakChip(card.expression, `study-front-${card.id}`);
+    frontMeta.appendChild(frontLeft);
+    frontMeta.appendChild(frontRight);
+
+    const frontBody = document.createElement('div');
+    frontBody.className = 'flashcard-front';
+    const expr = document.createElement('h3');
+    expr.className = 'flashcard-expression';
+    expr.textContent = card.expression;
+    const hint = document.createElement('p');
+    hint.className = 'flashcard-hint';
+    hint.textContent = 'Think of the meaning and example before flipping.';
+    const revealBtn = document.createElement('button');
+    revealBtn.type = 'button';
+    revealBtn.className = 'primary-btn flashcard-flip-cta';
+    revealBtn.textContent = 'Reveal Meaning (Space)';
+    revealBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      flipActiveCard(true);
+    });
+    frontBody.appendChild(expr);
+    frontBody.appendChild(hint);
+    frontBody.appendChild(revealBtn);
+
+    const frontFooter = document.createElement('div');
+    frontFooter.className = 'flashcard-meta';
+    frontFooter.innerHTML = '<span>Click anywhere on card to flip</span><span>Space</span>';
+
+    frontFace.appendChild(frontMeta);
+    frontFace.appendChild(frontBody);
+    frontFace.appendChild(frontFooter);
+
+    // BACK FACE
+    const backFace = document.createElement('div');
+    backFace.className = 'flashcard flashcard-face flashcard-face-back';
+    backFace.setAttribute('aria-hidden', String(!studyFlipped));
+
+    const backHead = document.createElement('div');
+    backHead.className = 'flashcard-back-head';
+    const backTitle = document.createElement('h3');
+    backTitle.className = 'flashcard-back-title';
+    backTitle.textContent = card.expression;
+    const backSpeak = createSpeakChip(card.expression, `study-back-${card.id}`);
+    backHead.appendChild(backTitle);
+    backHead.appendChild(backSpeak);
+
+    const backContent = document.createElement('div');
+    backContent.className = 'flashcard-back';
+
+    const mLine = document.createElement('p');
+    mLine.className = 'entry-line';
+    const mStrong = document.createElement('strong');
+    mStrong.textContent = 'Meaning: ';
+    mLine.appendChild(mStrong);
+    mLine.appendChild(document.createTextNode(card.meaning));
+
+    const eLine = document.createElement('p');
+    eLine.className = 'entry-line';
+    const eStrong = document.createElement('strong');
+    eStrong.textContent = 'Example: ';
+    eLine.appendChild(eStrong);
+    eLine.appendChild(document.createTextNode(card.example));
+
+    backContent.appendChild(mLine);
+    backContent.appendChild(eLine);
+
+    if (card.contextSentence) {
+      const cLine = document.createElement('p');
+      cLine.className = 'entry-line';
+      const cStrong = document.createElement('strong');
+      cStrong.textContent = 'Context: ';
+      cLine.appendChild(cStrong);
+      cLine.appendChild(document.createTextNode(card.contextSentence));
+      backContent.appendChild(cLine);
+    }
+
+    const backFooter = document.createElement('div');
+    backFooter.className = 'flashcard-footer';
+
+    const flipBackBtn = document.createElement('button');
+    flipBackBtn.type = 'button';
+    flipBackBtn.className = 'text-btn';
+    flipBackBtn.textContent = '← Flip to Front';
+    flipBackBtn.addEventListener('click', () => flipActiveCard(false));
+
+    const rateActions = document.createElement('div');
+    rateActions.className = 'study-rate-actions';
+
+    const reviewBtn = document.createElement('button');
+    reviewBtn.type = 'button';
+    reviewBtn.className = 'review-btn';
+    reviewBtn.textContent = 'Needs Review (1d)';
+    reviewBtn.addEventListener('click', () => rateStudyCard('needsReview'));
+
+    const knownBtn = document.createElement('button');
+    knownBtn.type = 'button';
+    knownBtn.className = 'accent-btn';
+    knownBtn.textContent = `Known (${intervals.masteredDays}d)`;
+    knownBtn.addEventListener('click', () => rateStudyCard('known'));
+
+    rateActions.appendChild(reviewBtn);
+    rateActions.appendChild(knownBtn);
+    backFooter.appendChild(flipBackBtn);
+    backFooter.appendChild(rateActions);
+
+    backFace.appendChild(backHead);
+    backFace.appendChild(backContent);
+    backFace.appendChild(backFooter);
+
+    inner.appendChild(frontFace);
+    inner.appendChild(backFace);
+    scene.appendChild(inner);
+
+    const shortcuts = document.createElement('p');
+    shortcuts.className = 'study-shortcuts';
+    shortcuts.textContent = 'Shortcuts: Space to flip · 1 = Needs Review · 2 = Known · Esc = Exit';
+
+    studyStage.appendChild(progressMeta);
+    studyStage.appendChild(progressTrack);
+    studyStage.appendChild(scene);
+    studyStage.appendChild(shortcuts);
+  }
+
+  btnStudyMode.addEventListener('click', openStudyMode);
+  btnStudyExit.addEventListener('click', closeStudyMode);
+  studyDeckSelect.addEventListener('change', () => startStudySession(studyDeckSelect.value));
+  btnStudyShuffle.addEventListener('click', () => {
+    startStudySession(studyScope, shuffleIds(studyDeckIds), studyMissedRound);
+  });
+
+  // ==================== Quiz Mode (Auto-Records Mistakes) ====================
+  function openQuizMode() {
+    stopSpeech();
+    if (isStudyMode) closeStudyMode();
+    isQuizMode = true;
+    quizPanel.hidden = false;
+    libraryListView.hidden = true;
+    quizPhase = 'setup';
+    quizSetupError = '';
+    const eligible = CUETShared.getQuizEligibleEntries(allEntries);
+    const maxQ = Math.min(CUETShared.QUIZ_MAX_QUESTIONS, eligible.length);
+    quizCount = Math.max(CUETShared.QUIZ_MIN_QUESTIONS, Math.min(10, maxQ || CUETShared.QUIZ_MIN_QUESTIONS));
+    renderQuizMode();
+  }
+
+  function closeQuizMode() {
+    stopSpeech();
+    isQuizMode = false;
+    quizPanel.hidden = true;
+    libraryListView.hidden = false;
+  }
+
+  function startQuizSession() {
+    const res = CUETShared.generateQuizQuestions(allEntries, {
+      mode: quizSelectionMode,
+      count: quizCount,
+      selectedIds: quizSelectedIds,
+    });
+    if (!res.ok) {
+      quizSetupError = res.error;
+      renderQuizMode();
+      return;
+    }
+    quizSetupError = '';
+    quizQuestions = res.questions;
+    quizIndex = 0;
+    quizChosenOption = null;
+    quizAnswers = [];
+    quizPromoted = false;
+    quizPhase = 'active';
+    renderQuizMode();
+  }
+
+  function renderQuizMode() {
+    if (!isQuizMode) return;
+    btnQuizSetup.hidden = quizPhase === 'setup';
+    quizStage.innerHTML = '';
+
+    const eligible = CUETShared.getQuizEligibleEntries(allEntries);
+
+    if (quizPhase === 'setup') {
+      if (eligible.length < CUETShared.QUIZ_MIN_QUESTIONS) {
+        const empty = document.createElement('div');
+        empty.className = 'study-empty';
+        empty.innerHTML = `
+          <p class="empty-state-title">Add a few more New or Learning words to start a quiz</p>
+          <p class="empty-state-desc">Quiz Mode needs at least ${CUETShared.QUIZ_MIN_QUESTIONS} "New" or "Learning" entries (currently ${eligible.length}).</p>
+        `;
+        quizStage.appendChild(empty);
+        return;
+      }
+
+      const maxQ = Math.min(CUETShared.QUIZ_MAX_QUESTIONS, eligible.length);
+      const wrap = document.createElement('div');
+      wrap.className = 'quiz-setup';
+
+      const modeRow = document.createElement('div');
+      modeRow.className = 'quiz-mode-row';
+      const modeLabel = document.createElement('span');
+      modeLabel.className = 'field-label';
+      modeLabel.textContent = `${eligible.length} eligible New/Learning entries`;
+
+      const modeToggle = document.createElement('div');
+      modeToggle.className = 'mastery-toggle';
+      const randBtn = document.createElement('button');
+      randBtn.type = 'button';
+      randBtn.className = 'mastery-opt' + (quizSelectionMode === 'random' ? ' is-active is-mastered' : '');
+      randBtn.textContent = 'Random Mix';
+      randBtn.addEventListener('click', () => {
+        quizSelectionMode = 'random';
+        quizSetupError = '';
+        renderQuizMode();
       });
-      if (res && res.ok && res.entry) {
-        allEntries = allEntries.map((item) => (item.id === id ? res.entry : item));
-        editDialog.close();
-        renderEntries();
-        showToast(`Updated "${res.entry.expression}".`, 'ok');
+      const customBtn = document.createElement('button');
+      customBtn.type = 'button';
+      customBtn.className = 'mastery-opt' + (quizSelectionMode === 'custom' ? ' is-active is-mastered' : '');
+      customBtn.textContent = 'Choose Specific Words';
+      customBtn.addEventListener('click', () => {
+        quizSelectionMode = 'custom';
+        quizSetupError = '';
+        renderQuizMode();
+      });
+      modeToggle.appendChild(randBtn);
+      modeToggle.appendChild(customBtn);
+      modeRow.appendChild(modeLabel);
+      modeRow.appendChild(modeToggle);
+      wrap.appendChild(modeRow);
+
+      const box = document.createElement('div');
+      box.className = 'quiz-box';
+
+      if (quizSelectionMode === 'random') {
+        const lbl = document.createElement('label');
+        lbl.className = 'field-label';
+        lbl.textContent = `Number of questions: ${quizCount} (range ${CUETShared.QUIZ_MIN_QUESTIONS}–${maxQ})`;
+        const range = document.createElement('input');
+        range.type = 'range';
+        range.min = String(CUETShared.QUIZ_MIN_QUESTIONS);
+        range.max = String(maxQ);
+        range.value = String(Math.min(maxQ, Math.max(CUETShared.QUIZ_MIN_QUESTIONS, quizCount)));
+        range.addEventListener('input', () => {
+          quizCount = Number(range.value);
+          lbl.textContent = `Number of questions: ${quizCount} (range ${CUETShared.QUIZ_MIN_QUESTIONS}–${maxQ})`;
+        });
+        box.appendChild(lbl);
+        box.appendChild(range);
       } else {
-        editError.textContent = (res && res.error) || 'Could not save changes.';
-        editError.hidden = false;
+        const pickerHead = document.createElement('div');
+        pickerHead.className = 'quiz-mode-row';
+        const pickerLbl = document.createElement('span');
+        pickerLbl.className = 'field-label';
+        pickerLbl.textContent = `Selected: ${quizSelectedIds.length} (pick ${CUETShared.QUIZ_MIN_QUESTIONS}–${maxQ})`;
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'text-btn';
+        clearBtn.textContent = 'Clear';
+        clearBtn.addEventListener('click', () => {
+          quizSelectedIds = [];
+          renderQuizMode();
+        });
+        pickerHead.appendChild(pickerLbl);
+        pickerHead.appendChild(clearBtn);
+        box.appendChild(pickerHead);
+
+        const listEl = document.createElement('div');
+        listEl.className = 'quiz-picker-list';
+        for (const item of eligible) {
+          const row = document.createElement('label');
+          row.className = 'quiz-picker-item';
+          const left = document.createElement('span');
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.checked = quizSelectedIds.includes(item.id);
+          cb.style.marginRight = '8px';
+          cb.addEventListener('change', () => {
+            if (cb.checked) {
+              if (quizSelectedIds.length < CUETShared.QUIZ_MAX_QUESTIONS) {
+                quizSelectedIds.push(item.id);
+              } else {
+                cb.checked = false;
+              }
+            } else {
+              quizSelectedIds = quizSelectedIds.filter((id) => id !== item.id);
+            }
+            pickerLbl.textContent = `Selected: ${quizSelectedIds.length} (pick ${CUETShared.QUIZ_MIN_QUESTIONS}–${maxQ})`;
+          });
+          left.appendChild(cb);
+          left.appendChild(document.createTextNode(item.expression));
+          const cat = document.createElement('span');
+          cat.className = 'entry-meta';
+          cat.textContent = CUETShared.CATEGORIES[item.category];
+          row.appendChild(left);
+          row.appendChild(cat);
+          listEl.appendChild(row);
+        }
+        box.appendChild(listEl);
       }
-    } catch (err) {
-      editError.textContent = err.message;
-      editError.hidden = false;
+      wrap.appendChild(box);
+
+      if (quizSetupError) {
+        const errP = document.createElement('p');
+        errP.className = 'modal-error';
+        errP.textContent = quizSetupError;
+        wrap.appendChild(errP);
+      }
+
+      const startBtn = document.createElement('button');
+      startBtn.type = 'button';
+      startBtn.className = 'primary-btn';
+      startBtn.textContent = 'Start Quiz';
+      startBtn.addEventListener('click', startQuizSession);
+      wrap.appendChild(startBtn);
+      quizStage.appendChild(wrap);
+      return;
+    }
+
+    if (quizPhase === 'summary') {
+      const correctAnswers = quizAnswers.filter((a) => a.isCorrect);
+      const wrongCount = quizAnswers.length - correctAnswers.length;
+      const pct = quizAnswers.length > 0 ? Math.round((correctAnswers.length / quizAnswers.length) * 100) : 0;
+
+      const wrap = document.createElement('div');
+      wrap.className = 'study-summary';
+      wrap.innerHTML = `
+        <p class="study-eyebrow">Quiz Complete</p>
+        <h3 class="study-summary-title">You scored ${correctAnswers.length} / ${quizAnswers.length} (${pct}%)</h3>
+        <div class="study-stats-grid">
+          <div class="study-stat-box is-known">
+            <div class="study-stat-num">${correctAnswers.length}</div>
+            <div class="study-stat-label">Correct</div>
+          </div>
+          <div class="study-stat-box is-review">
+            <div class="study-stat-num">${wrongCount}</div>
+            <div class="study-stat-label">Missed (Logged to Needs Practice)</div>
+          </div>
+        </div>
+      `;
+
+      const actions = document.createElement('div');
+      actions.className = 'study-summary-actions';
+
+      if (correctAnswers.length > 0 && !quizPromoted) {
+        const promoBtn = document.createElement('button');
+        promoBtn.type = 'button';
+        promoBtn.className = 'primary-btn';
+        promoBtn.textContent = `Mark ${correctAnswers.length} Correct as Mastered`;
+        promoBtn.addEventListener('click', async () => {
+          promoBtn.disabled = true;
+          const ids = correctAnswers.map((a) => a.entryId);
+          await sendMessage({
+            type: 'BULK_UPDATE_ENTRIES',
+            payload: { ids, patch: { masteryLevel: 'mastered' } },
+          });
+          quizPromoted = true;
+          await loadState();
+          showToast(`Promoted ${ids.length} words to Mastered.`, 'ok');
+          renderQuizMode();
+        });
+        actions.appendChild(promoBtn);
+      }
+
+      const againBtn = document.createElement('button');
+      againBtn.type = 'button';
+      againBtn.className = 'secondary-btn';
+      againBtn.textContent = 'New Quiz';
+      againBtn.addEventListener('click', () => {
+        quizPhase = 'setup';
+        renderQuizMode();
+      });
+
+      const exitBtn = document.createElement('button');
+      exitBtn.type = 'button';
+      exitBtn.className = 'secondary-btn';
+      exitBtn.textContent = 'Back to Vault';
+      exitBtn.addEventListener('click', closeQuizMode);
+
+      actions.appendChild(againBtn);
+      actions.appendChild(exitBtn);
+      wrap.appendChild(actions);
+      quizStage.appendChild(wrap);
+      return;
+    }
+
+    // Active question
+    const q = quizQuestions[quizIndex];
+    const pct = Math.round(((quizIndex + 1) / quizQuestions.length) * 100);
+
+    const progressMeta = document.createElement('div');
+    progressMeta.className = 'study-progress-meta';
+    const scoreSoFar = quizAnswers.filter((a) => a.isCorrect).length;
+    progressMeta.innerHTML = `<span>Question ${quizIndex + 1} of ${quizQuestions.length}</span><span>Score: ${scoreSoFar}/${quizAnswers.length}</span>`;
+
+    const progressTrack = document.createElement('div');
+    progressTrack.className = 'study-progress-track';
+    const progressFill = document.createElement('div');
+    progressFill.className = 'study-progress-fill';
+    progressFill.style.width = `${pct}%`;
+    progressTrack.appendChild(progressFill);
+
+    const card = document.createElement('div');
+    card.className = 'flashcard';
+
+    const meta = document.createElement('div');
+    meta.className = 'flashcard-meta';
+    const leftMeta = document.createElement('span');
+    leftMeta.textContent = `${CUETShared.CATEGORIES[q.category] || 'Vocabulary'} · Choose the correct meaning`;
+    const speakBtn = createSpeakChip(q.expression, `quiz-${q.id}`);
+    meta.appendChild(leftMeta);
+    meta.appendChild(speakBtn);
+
+    const title = document.createElement('h3');
+    title.className = 'flashcard-back-title';
+    title.textContent = q.expression;
+
+    const optsWrap = document.createElement('div');
+    optsWrap.className = 'quiz-options';
+
+    const answered = quizChosenOption !== null;
+    q.options.forEach((optText, idx) => {
+      const optBtn = document.createElement('button');
+      optBtn.type = 'button';
+      optBtn.className = 'quiz-option';
+      optBtn.disabled = answered;
+      if (answered) {
+        if (idx === q.correctIndex) optBtn.classList.add('is-correct');
+        else if (idx === quizChosenOption) optBtn.classList.add('is-wrong');
+      }
+      optBtn.textContent = `${String.fromCharCode(65 + idx)}. ${optText}`;
+      optBtn.addEventListener('click', async () => {
+        if (quizChosenOption !== null) return;
+        quizChosenOption = idx;
+        const isCorrect = idx === q.correctIndex;
+        quizAnswers.push({ entryId: q.entryId, expression: q.expression, isCorrect });
+        if (!isCorrect) {
+          try {
+            await sendMessage({ type: 'RECORD_MISS', payload: { id: q.entryId } });
+            await loadState();
+          } catch {
+            // Keep quiz flowing
+          }
+        }
+        renderQuizMode();
+      });
+      optsWrap.appendChild(optBtn);
+    });
+
+    card.appendChild(meta);
+    card.appendChild(title);
+    card.appendChild(optsWrap);
+
+    if (answered) {
+      const footer = document.createElement('div');
+      footer.className = 'flashcard-footer';
+      const exNote = document.createElement('span');
+      exNote.className = 'flashcard-tip';
+      exNote.textContent = q.example ? `Example: ${q.example}` : '';
+      const nextBtn = document.createElement('button');
+      nextBtn.type = 'button';
+      nextBtn.className = 'primary-btn';
+      nextBtn.textContent = quizIndex + 1 >= quizQuestions.length ? 'See Results' : 'Next Question →';
+      nextBtn.addEventListener('click', () => {
+        if (quizIndex + 1 >= quizQuestions.length) {
+          quizPhase = 'summary';
+        } else {
+          quizIndex++;
+          quizChosenOption = null;
+        }
+        renderQuizMode();
+      });
+      footer.appendChild(exNote);
+      footer.appendChild(nextBtn);
+      card.appendChild(footer);
+    }
+
+    quizStage.appendChild(progressMeta);
+    quizStage.appendChild(progressTrack);
+    quizStage.appendChild(card);
+  }
+
+  btnQuizMode.addEventListener('click', openQuizMode);
+  btnQuizExit.addEventListener('click', closeQuizMode);
+  btnQuizSetup.addEventListener('click', () => {
+    quizPhase = 'setup';
+    renderQuizMode();
+  });
+
+  // Keyboard shortcuts for Study Mode
+  document.addEventListener('keydown', (e) => {
+    if (!isStudyMode || studyComplete) return;
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      flipActiveCard();
+    } else if (e.key === '1' && studyFlipped) {
+      e.preventDefault();
+      rateStudyCard('needsReview');
+    } else if (e.key === '2' && studyFlipped) {
+      e.preventDefault();
+      rateStudyCard('known');
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeStudyMode();
     }
   });
 
-  btnEditClose.addEventListener('click', () => editDialog.close());
-  btnEditCancel.addEventListener('click', () => editDialog.close());
+  // ==================== Add & Backup Collapsible Panels ====================
+  function syncPanelToggleButtons() {
+    const addOpen = !addPanel.hidden;
+    const backupOpen = !backupPanel.hidden;
+    btnToggleAdd.setAttribute('aria-expanded', String(addOpen));
+    btnToggleAdd.classList.toggle('is-active-panel', addOpen);
+    btnToggleAdd.textContent = addOpen ? 'Add Entries ✓' : 'Add Entries';
 
-  btnConfirmCancel.addEventListener('click', () => {
-    pendingConfirmAction = null;
-    confirmDialog.close();
-  });
-
-  btnConfirmProceed.addEventListener('click', async () => {
-    const action = pendingConfirmAction;
-    pendingConfirmAction = null;
-    confirmDialog.close();
-    if (typeof action === 'function') {
-      await action();
-    }
-  });
-
-  // Tab switching
-  for (const btn of tabBtns) {
-    btn.addEventListener('click', () => {
-      activeTab = btn.dataset.tab;
-      for (const b of tabBtns) {
-        b.setAttribute('aria-selected', b.dataset.tab === activeTab ? 'true' : 'false');
-      }
-      renderEntries();
-    });
+    btnToggleBackup.setAttribute('aria-expanded', String(backupOpen));
+    btnToggleBackup.classList.toggle('is-active-panel', backupOpen);
+    btnToggleBackup.textContent = backupOpen ? 'Backup & Export ✓' : 'Backup & Export';
   }
 
-  searchInput.addEventListener('input', () => {
-    searchQuery = searchInput.value;
-    renderEntries();
-  });
-
-  if (btnClearSearch) {
-    btnClearSearch.addEventListener('click', () => {
-      searchQuery = '';
-      searchInput.value = '';
-      renderEntries();
-      searchInput.focus();
-    });
-  }
-
-  filterSelect.addEventListener('change', () => {
-    statusFilter = filterSelect.value;
-    renderEntries();
-  });
-
-  sortSelect.addEventListener('change', () => {
-    sortOrder = sortSelect.value;
-    renderEntries();
-  });
-
-  // Collapsible panels
   btnToggleAdd.addEventListener('click', () => {
     addPanel.hidden = !addPanel.hidden;
     if (!addPanel.hidden) {
       backupPanel.hidden = true;
       dashEntryInput.focus();
     }
+    syncPanelToggleButtons();
   });
+
   btnCloseAdd.addEventListener('click', () => {
     addPanel.hidden = true;
+    syncPanelToggleButtons();
   });
 
   btnToggleBackup.addEventListener('click', () => {
     backupPanel.hidden = !backupPanel.hidden;
-    if (!backupPanel.hidden) addPanel.hidden = true;
-  });
-  btnCloseBackup.addEventListener('click', () => {
-    backupPanel.hidden = true;
+    if (!backupPanel.hidden) {
+      addPanel.hidden = true;
+      updateSheetSyncControls();
+    }
+    syncPanelToggleButtons();
   });
 
-  // Dashboard manual & bulk add
+  btnCloseBackup.addEventListener('click', () => {
+    backupPanel.hidden = true;
+    syncPanelToggleButtons();
+  });
+
   dashAddForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const list = CUETShared.parseBulkInput(dashEntryInput.value);
     if (list.length === 0) {
-      dashAddStatus.hidden = false;
-      dashAddSummary.textContent = 'Enter at least one word, idiom, or phrasal verb.';
-      dashAddDetails.innerHTML = '';
+      showToast('Enter at least one word, idiom, or phrasal verb.', 'error');
+      dashEntryInput.focus();
       return;
     }
 
@@ -917,18 +2319,16 @@
     dashAddStatus.hidden = false;
     dashAddDetails.innerHTML = '';
 
-    const selectedCategory = dashCategorySelect.value;
     let saved = 0;
-    let skipped = 0;
+    let dup = 0;
     let failed = 0;
+    const selectedCategory = dashCategorySelect.value;
 
     for (let i = 0; i < list.length; i++) {
       const expr = list[i];
       const cat = selectedCategory === 'auto' ? CUETShared.detectCategory(expr) : selectedCategory;
       dashAddSummary.textContent =
         list.length === 1 ? `Analysing "${expr}"…` : `Analysing ${i + 1} of ${list.length}: "${expr}"…`;
-
-      const li = document.createElement('li');
       try {
         const res = await sendMessage({
           type: 'SAVE_AND_ANALYSE',
@@ -940,1182 +2340,397 @@
             sourceUrl: '',
           },
         });
-        if (res && res.ok && res.entry) {
+        const li = document.createElement('li');
+        if (res && res.ok) {
           saved++;
-          allEntries.unshift(res.entry);
-          li.textContent = `Saved "${res.entry.expression}" to ${CUETShared.CATEGORIES[res.entry.category]}.`;
-          renderEntries();
+          li.textContent = `Saved "${res.entry.expression}" (${CUETShared.CATEGORIES[res.entry.category]})`;
+          await loadState();
         } else if (res && res.duplicate) {
-          skipped++;
-          li.textContent = `Skipped duplicate: "${expr}".`;
+          dup++;
+          li.textContent = `Skipped duplicate: "${expr}"`;
         } else {
           failed++;
           li.className = 'err';
           li.textContent = `Failed "${expr}": ${(res && res.error) || 'Unknown error'}`;
         }
+        dashAddDetails.appendChild(li);
       } catch (err) {
         failed++;
+        const li = document.createElement('li');
         li.className = 'err';
         li.textContent = `Failed "${expr}": ${err.message}`;
+        dashAddDetails.appendChild(li);
       }
-      dashAddDetails.appendChild(li);
     }
 
-    const summaryParts = [];
-    if (saved) summaryParts.push(`${saved} saved`);
-    if (skipped) summaryParts.push(`${skipped} skipped (duplicate)`);
-    if (failed) summaryParts.push(`${failed} failed`);
-    dashAddSummary.textContent = `Completed: ${summaryParts.join(', ')}.`;
+    const parts = [];
+    if (saved) parts.push(`${saved} saved`);
+    if (dup) parts.push(`${dup} duplicate`);
+    if (failed) parts.push(`${failed} failed`);
+    dashAddSummary.textContent = `Done: ${parts.join(', ')}.`;
 
-    if (saved > 0 && failed === 0) {
-      dashEntryInput.value = '';
-    }
+    if (saved > 0 && failed === 0) dashEntryInput.value = '';
     btnDashSave.disabled = false;
     btnDashSave.textContent = 'Save and Analyse';
+    await loadState();
   });
 
-  // Export JSON (strictly excludes API key)
+  // ==================== Export / Import / Copy / Paste JSON, CSV, PDF, Anki ====================
   btnExportJson.addEventListener('click', async () => {
     try {
       const res = await sendMessage({ type: 'EXPORT_BACKUP_JSON' });
-      if (res && res.ok && res.backup) {
+      if (res && res.ok) {
+        const blob = new Blob([JSON.stringify(res.backup, null, 2)], { type: 'application/json' });
         const stamp = new Date().toISOString().slice(0, 10);
-        triggerDownload(
-          `cuet-vocab-backup-${stamp}.json`,
-          JSON.stringify(res.backup, null, 2),
-          'application/json'
-        );
-        showToast(`Exported ${res.backup.entries.length} entries as JSON backup (API key excluded).`, 'ok');
-      } else {
-        showToast((res && res.error) || 'Export failed.', 'error');
+        triggerFileDownload(blob, `ipmat-cuet-vocab-backup-${stamp}.json`);
+        showToast(`Exported ${res.backup.entries.length} entries to JSON backup.`, 'ok');
       }
     } catch (err) {
-      showToast('Export failed: ' + err.message, 'error');
+      showToast(err.message, 'error');
     }
   });
 
-  // Import JSON (validated safe merge — never deletes/overwrites existing entries)
+  btnCopyJson.addEventListener('click', async () => {
+    try {
+      const res = await sendMessage({ type: 'EXPORT_BACKUP_JSON' });
+      if (res && res.ok) {
+        await navigator.clipboard.writeText(JSON.stringify(res.backup, null, 2));
+        showToast(`Copied ${res.backup.entries.length} entries as JSON to clipboard.`, 'ok');
+      }
+    } catch (err) {
+      showToast('Could not copy JSON to clipboard: ' + err.message, 'error');
+    }
+  });
+
   btnImportJson.addEventListener('click', () => {
     importFileInput.value = '';
     importFileInput.click();
   });
 
+  async function importJsonPayloadText(rawText) {
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      showToast('Invalid JSON format. Check the pasted or uploaded backup.', 'error');
+      return false;
+    }
+    const res = await sendMessage({ type: 'IMPORT_BACKUP', payload: parsed });
+    if (res && res.ok) {
+      await loadState();
+      showToast(
+        `Imported ${res.addedCount} new ${res.addedCount === 1 ? 'entry' : 'entries'}${
+          res.skippedCount ? ` (${res.skippedCount} duplicates skipped)` : ''
+        }.`,
+        'ok'
+      );
+      return true;
+    }
+    showToast((res && res.error) || 'Import failed.', 'error');
+    return false;
+  }
+
   importFileInput.addEventListener('change', async () => {
     const file = importFileInput.files && importFileInput.files[0];
     if (!file) return;
-
     try {
       const text = await file.text();
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        showToast('Could not import: this file is not valid JSON.', 'error');
-        return;
-      }
-
-      const res = await sendMessage({ type: 'IMPORT_BACKUP', payload: parsed });
-      if (res && res.ok) {
-        await loadState();
-        showToast(
-          `Imported ${res.addedCount} new ${res.addedCount === 1 ? 'entry' : 'entries'} (${res.skippedCount} existing skipped safely).`,
-          'ok'
-        );
-      } else {
-        showToast((res && res.error) || 'Import failed.', 'error');
-      }
+      await importJsonPayloadText(text);
     } catch (err) {
-      showToast('Import failed: ' + err.message, 'error');
+      showToast('Could not read file: ' + err.message, 'error');
     }
   });
 
-  // Download CSV (Word, Meaning, Example Sentence)
-  async function handleDownloadCsv() {
-    if (allEntries.length === 0) {
-      showToast('Your library is empty — add entries before downloading CSV.', 'error');
+  btnTogglePasteJson.addEventListener('click', () => {
+    pasteJsonBox.hidden = !pasteJsonBox.hidden;
+    if (!pasteJsonBox.hidden) pasteJsonInput.focus();
+  });
+
+  btnPasteJsonCancel.addEventListener('click', () => {
+    pasteJsonBox.hidden = true;
+    pasteJsonInput.value = '';
+  });
+
+  btnPasteJsonMerge.addEventListener('click', async () => {
+    const raw = pasteJsonInput.value.trim();
+    if (!raw) {
+      showToast('Paste your JSON backup text first.', 'error');
+      pasteJsonInput.focus();
       return;
     }
+    const ok = await importJsonPayloadText(raw);
+    if (ok) {
+      pasteJsonBox.hidden = true;
+      pasteJsonInput.value = '';
+    }
+  });
+
+  async function handleExportCsv() {
     try {
-      const res = await sendMessage({ type: 'EXPORT_CSV', payload: {} });
+      const res = await sendMessage({ type: 'EXPORT_CSV' });
       if (res && res.ok) {
+        if (!res.count) {
+          showToast('No entries to export yet.', 'neutral');
+          return;
+        }
+        const blob = new Blob(['\uFEFF' + res.csv], { type: 'text/csv;charset=utf-8' });
         const stamp = new Date().toISOString().slice(0, 10);
-        triggerDownload(`cuet-vocab-${stamp}.csv`, '\uFEFF' + res.csv, 'text/csv;charset=utf-8');
-        showToast(
-          `Downloaded CSV with ${res.count} ${res.count === 1 ? 'entry' : 'entries'} (Word, Meaning, Example Sentence).`,
-          'ok'
-        );
-      } else {
-        showToast((res && res.error) || 'CSV download failed.', 'error');
+        triggerFileDownload(blob, `ipmat-cuet-vocab-${stamp}.csv`);
+        showToast(`Downloaded CSV with ${res.count} entries.`, 'ok');
       }
     } catch (err) {
-      showToast('CSV download failed: ' + err.message, 'error');
+      showToast(err.message, 'error');
     }
   }
 
-  if (btnDownloadCsv) btnDownloadCsv.addEventListener('click', handleDownloadCsv);
-  btnExportCsv.addEventListener('click', handleDownloadCsv);
+  btnDownloadCsv.addEventListener('click', handleExportCsv);
+  btnExportCsv.addEventListener('click', handleExportCsv);
 
-  function updateSheetSyncUi() {
-    if (btnSheetPush) {
-      btnSheetPush.disabled = isSheetSyncBusy || !hasSheetWebhook;
-      btnSheetPush.textContent = isSheetSyncBusy ? 'Syncing…' : 'Push to Sheet';
+  btnExportAnki.addEventListener('click', async () => {
+    try {
+      const res = await sendMessage({ type: 'EXPORT_ANKI_TSV' });
+      if (res && res.ok) {
+        if (!res.count) {
+          showToast('No entries to export to Anki yet.', 'neutral');
+          return;
+        }
+        const blob = new Blob(['\uFEFF' + res.tsv], { type: 'text/tab-separated-values;charset=utf-8' });
+        const stamp = new Date().toISOString().slice(0, 10);
+        triggerFileDownload(blob, `ipmat-cuet-anki-cards-${stamp}.tsv`);
+        showToast(`Exported ${res.count} entries for Anki (.tsv).`, 'ok');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
     }
-    if (btnSheetPull) {
-      btnSheetPull.disabled = isSheetSyncBusy || !hasSheetWebhook;
-      btnSheetPull.textContent = isSheetSyncBusy ? 'Syncing…' : 'Pull from Sheet';
-    }
-    if (sheetSyncNote) {
-      sheetSyncNote.hidden = false;
-      sheetSyncNote.textContent = hasSheetWebhook
-        ? 'Google Apps Script webhook connected — Push appends missing local entries to Google Sheets; Pull imports rows edited or added in your Sheet.'
-        : 'To enable Push/Pull with Google Sheets, paste your Apps Script Web App URL (/exec) in Settings.';
-    }
-  }
+  });
 
-  function updatePdfPreview() {
-    if (!pdfCategorySelect || !pdfSortSelect || !pdfPreviewNote || !btnPdfConfirm) return;
+  // PDF Dialog
+  function updatePdfPreviewNote() {
     const cat = pdfCategorySelect.value;
-    const counts = CUETShared.getCategoryCounts(allEntries);
-    const labelMap = {
-      all: `All Categories (${counts.total})`,
-      vocabulary: `Words / Vocabulary (${counts.vocabulary})`,
-      idioms: `Idioms (${counts.idioms})`,
-      phrasalVerbs: `Phrasal Verbs (${counts.phrasalVerbs})`,
-    };
-    for (const opt of Array.from(pdfCategorySelect.options)) {
-      if (labelMap[opt.value]) opt.textContent = labelMap[opt.value];
-    }
-
-    const plan = CUETShared.buildPdfStudySheetPlan(allEntries, {
-      category: cat,
-      sortOrder: pdfSortSelect.value,
-    });
-    if (plan.totalCount === 0) {
-      pdfPreviewNote.className = 'pdf-preview-note is-empty';
-      pdfPreviewNote.textContent = `No saved entries in ${plan.categoryLabel}. Choose another category or add entries first.`;
-      btnPdfConfirm.disabled = true;
-    } else {
-      pdfPreviewNote.className = 'pdf-preview-note';
-      pdfPreviewNote.textContent = `Ready to generate ${plan.categoryLabel} study sheet with ${plan.totalCount} ${plan.totalCount === 1 ? 'entry' : 'entries'}.`;
-      btnPdfConfirm.disabled = false;
-    }
+    const subset = cat === 'all' ? allEntries : allEntries.filter((e) => e.category === cat);
+    pdfPreviewNote.textContent =
+      subset.length > 0
+        ? `Ready to generate A4 PDF with ${subset.length} ${subset.length === 1 ? 'entry' : 'entries'}.`
+        : 'No entries available in this category.';
+    btnPdfConfirm.disabled = subset.length === 0;
   }
 
   function openPdfDialog() {
-    if (!pdfDialog) return;
-    if (pdfCategorySelect) {
-      pdfCategorySelect.value = activeTab || 'all';
-    }
-    updatePdfPreview();
+    pdfCategorySelect.value = activeTab === 'all' ? 'all' : activeTab;
+    updatePdfPreviewNote();
     pdfDialog.showModal();
   }
 
-  if (btnDownloadPdf) btnDownloadPdf.addEventListener('click', openPdfDialog);
-  if (btnExportPdf) btnExportPdf.addEventListener('click', openPdfDialog);
-  if (pdfCategorySelect) pdfCategorySelect.addEventListener('change', updatePdfPreview);
-  if (pdfSortSelect) pdfSortSelect.addEventListener('change', updatePdfPreview);
-  if (btnPdfClose) btnPdfClose.addEventListener('click', () => pdfDialog.close());
-  if (btnPdfCancel) btnPdfCancel.addEventListener('click', () => pdfDialog.close());
+  btnDownloadPdf.addEventListener('click', openPdfDialog);
+  btnExportPdf.addEventListener('click', openPdfDialog);
+  pdfCategorySelect.addEventListener('change', updatePdfPreviewNote);
+  btnPdfClose.addEventListener('click', () => pdfDialog.close());
+  btnPdfCancel.addEventListener('click', () => pdfDialog.close());
 
-  if (pdfForm) {
-    pdfForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      try {
-        const result = CUETShared.buildPdfStudySheetBytes(allEntries, {
-          category: pdfCategorySelect ? pdfCategorySelect.value : 'all',
-          sortOrder: pdfSortSelect ? pdfSortSelect.value : 'az',
-        });
-        pdfDialog.close();
-        triggerDownload(result.filename, result.bytes, 'application/pdf');
-        showToast(
-          `Downloaded PDF study sheet (${result.entryCount} ${result.entryCount === 1 ? 'entry' : 'entries'} in ${result.categoryLabel}).`,
-          'ok'
-        );
-      } catch (err) {
-        showToast('PDF export failed: ' + (err && err.message ? err.message : 'Unknown error'), 'error');
-      }
-    });
+  pdfForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    try {
+      const pdf = CUETShared.buildPdfStudySheetBytes(allEntries, {
+        category: pdfCategorySelect.value,
+        sortOrder: pdfSortSelect.value,
+      });
+      const blob = new Blob([pdf.bytes], { type: 'application/pdf' });
+      triggerFileDownload(blob, pdf.filename);
+      pdfDialog.close();
+      showToast(`Downloaded PDF study sheet (${pdf.entryCount} entries).`, 'ok');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
+
+  // ==================== Edit & Confirm Dialogs ====================
+  function openEditDialog(entry) {
+    editId.value = entry.id;
+    editExpression.value = entry.expression;
+    editCategory.value = entry.category;
+    editMeaning.value = entry.meaning;
+    editExample.value = entry.example;
+    editError.hidden = true;
+    editDialog.showModal();
   }
 
-  if (btnExportAnki) {
-    btnExportAnki.addEventListener('click', async () => {
-      if (allEntries.length === 0) {
-        showToast('Your library is empty — add entries before exporting for Anki.', 'error');
-        return;
+  btnEditClose.addEventListener('click', () => editDialog.close());
+  btnEditCancel.addEventListener('click', () => editDialog.close());
+
+  editForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    editError.hidden = true;
+    const id = editId.value;
+    const patch = {
+      expression: editExpression.value.trim(),
+      category: editCategory.value,
+      meaning: editMeaning.value.trim(),
+      example: editExample.value.trim(),
+    };
+    if (!patch.expression || !patch.meaning || !patch.example) {
+      editError.hidden = false;
+      editError.textContent = 'Expression, meaning, and example are all required.';
+      return;
+    }
+    try {
+      const res = await sendMessage({ type: 'UPDATE_ENTRY', payload: { id, patch, skipReviewSchedule: true } });
+      if (res && res.ok) {
+        editDialog.close();
+        await loadState();
+        showToast(`Saved changes to "${res.entry.expression}".`, 'ok');
+      } else {
+        editError.hidden = false;
+        editError.textContent = (res && res.error) || 'Could not save changes.';
       }
-      try {
-        const res = await sendMessage({ type: 'EXPORT_ANKI_TSV' });
-        if (res && res.ok) {
-          const stamp = new Date().toISOString().slice(0, 10);
-          triggerDownload(`cuet-anki-${stamp}.tsv`, res.tsv, 'text/tab-separated-values;charset=utf-8');
-          showToast(
-            `Exported ${res.count} ${res.count === 1 ? 'card' : 'cards'} to Anki (.tsv) with Meaning, Example & mastery tags.`,
-            'ok'
-          );
-        } else {
-          showToast((res && res.error) || 'Anki export failed.', 'error');
-        }
-      } catch (err) {
-        showToast('Anki export failed: ' + err.message, 'error');
-      }
-    });
+    } catch (err) {
+      editError.hidden = false;
+      editError.textContent = err.message;
+    }
+  });
+
+  function openConfirmDialog(title, message, proceedLabel, action) {
+    confirmTitle.textContent = title;
+    confirmMessage.textContent = message;
+    btnConfirmProceed.textContent = proceedLabel;
+    pendingConfirmAction = action;
+    confirmDialog.showModal();
   }
 
-  if (btnSheetPush) {
-    btnSheetPush.addEventListener('click', async () => {
-      if (!hasSheetWebhook) {
-        showToast('Add your Google Apps Script Web App URL in Settings first.', 'error');
-        return;
-      }
-      if (allEntries.length === 0) {
-        showToast('Your library is empty — nothing to push.', 'error');
-        return;
-      }
-      isSheetSyncBusy = true;
-      updateSheetSyncUi();
-      try {
-        const res = await sendMessage({ type: 'PUSH_TO_SHEET' });
-        if (res && res.ok) {
-          showToast(
-            res.addedCount > 0
-              ? `Pushed ${res.addedCount} new ${res.addedCount === 1 ? 'entry' : 'entries'} to Google Sheets (${res.skippedCount} already present).`
-              : `All ${res.skippedCount} entries are already in Google Sheets.`,
-            'ok'
-          );
-        } else {
-          showToast((res && res.error) || 'Push to Google Sheets failed.', 'error');
-        }
-      } catch (err) {
-        showToast('Push failed: ' + err.message, 'error');
-      } finally {
-        isSheetSyncBusy = false;
-        updateSheetSyncUi();
-      }
-    });
-  }
+  btnConfirmCancel.addEventListener('click', () => {
+    pendingConfirmAction = null;
+    confirmDialog.close();
+  });
 
-  if (btnSheetPull) {
-    btnSheetPull.addEventListener('click', async () => {
-      if (!hasSheetWebhook) {
-        showToast('Add your Google Apps Script Web App URL in Settings first.', 'error');
-        return;
-      }
-      isSheetSyncBusy = true;
-      updateSheetSyncUi();
-      try {
-        const res = await sendMessage({ type: 'PULL_FROM_SHEET' });
-        if (res && res.ok) {
-          if (Array.isArray(res.entries)) {
-            allEntries = res.entries;
-            renderEntries();
-          } else {
-            await loadState();
-          }
-          showToast(
-            `Pulled from Sheet: ${res.addedCount} added, ${res.updatedCount} updated (${res.unchangedCount} unchanged).`,
-            'ok'
-          );
-        } else {
-          showToast((res && res.error) || 'Pull from Google Sheets failed.', 'error');
-        }
-      } catch (err) {
-        showToast('Pull failed: ' + err.message, 'error');
-      } finally {
-        isSheetSyncBusy = false;
-        updateSheetSyncUi();
-      }
-    });
-  }
+  btnConfirmProceed.addEventListener('click', async () => {
+    const fn = pendingConfirmAction;
+    pendingConfirmAction = null;
+    confirmDialog.close();
+    if (fn) await fn();
+  });
 
-  // Clear Library (requires confirmation)
   btnClearLibrary.addEventListener('click', () => {
     if (allEntries.length === 0) {
-      showToast('Your library is already empty.', 'ok');
+      showToast('Your Vocab Vault is already empty.', 'neutral');
       return;
     }
-    openConfirm({
-      title: 'Clear Entire Library',
-      message: `This will permanently delete all ${allEntries.length} saved words, idioms, and phrasal verbs from local browser storage. Your Gemini API key in Settings will stay saved. Export a JSON backup first if you want a copy.`,
-      confirmLabel: 'Clear Library',
-      onConfirm: async () => {
+    openConfirmDialog(
+      'Clear Entire Vocab Vault?',
+      `This will permanently remove all ${allEntries.length} saved entries from local browser storage. Export a JSON backup first if you want to keep a copy.`,
+      'Clear Library',
+      async () => {
         const res = await sendMessage({ type: 'CLEAR_ALL_ENTRIES' });
         if (res && res.ok) {
-          allEntries = [];
-          renderEntries();
-          showToast('Library cleared.', 'ok');
-        } else {
-          showToast((res && res.error) || 'Could not clear library.', 'error');
+          selectedIds.clear();
+          await loadState();
+          showToast('Cleared all entries from THE VOCAB VAULT.', 'neutral');
         }
-      },
-    });
+      }
+    );
   });
 
-  // Study Mode logic
-  function getActiveStudyDeck() {
-    const byId = new Map(allEntries.map((e) => [e.id, e]));
-    return studyDeckIds.map((id) => byId.get(id)).filter(Boolean);
-  }
-
-  function startStudySession(ids, missedOnly) {
-    studyDeckIds = ids;
-    studyIndex = 0;
-    studyFlipped = false;
-    studyKnownIds = [];
-    studyNeedsReviewIds = [];
-    studyComplete = false;
-    studyMissedRound = Boolean(missedOnly);
-    renderStudyMode();
-  }
-
-  function updateStudyDeckOptions() {
-    if (!studyDeckSelect) return;
-    const counts = CUETShared.getCategoryCounts(allEntries);
-    const reviewCount = allEntries.filter((e) => CUETShared.getMasteryLevel(e) !== 'mastered').length;
-    const labels = {
-      all: `All Collections (${counts.total})`,
-      needsReview: `Needs Review (${reviewCount})`,
-      vocabulary: `Vocabulary (${counts.vocabulary})`,
-      idioms: `Idioms (${counts.idioms})`,
-      phrasalVerbs: `Phrasal Verbs (${counts.phrasalVerbs})`,
-    };
-    for (const opt of Array.from(studyDeckSelect.options)) {
-      if (labels[opt.value]) opt.textContent = labels[opt.value];
-    }
-  }
-
-  async function rateStudyCard(outcome) {
-    const deck = getActiveStudyDeck();
-    const card = deck[studyIndex];
-    if (!card || !studyFlipped || studyComplete) return;
-
-    const nextMastery = CUETShared.getStudyMasteryForOutcome(outcome);
-    if (outcome === 'known') {
-      if (!studyKnownIds.includes(card.id)) studyKnownIds.push(card.id);
-    } else {
-      if (!studyNeedsReviewIds.includes(card.id)) studyNeedsReviewIds.push(card.id);
-    }
-
-    if (studyIndex + 1 >= deck.length) {
-      studyComplete = true;
-      studyFlipped = false;
-    } else {
-      studyIndex++;
-      studyFlipped = false;
-    }
-
-    await toggleField(card.id, 'masteryLevel', nextMastery);
-  }
-
-  function renderStudyMode() {
-    if (!studyPanel || !studyStage) return;
-    updateStudyDeckOptions();
-    if (studyHeading) {
-      studyHeading.textContent = studyMissedRound ? 'Study Mode · Missed Cards' : 'Study Mode';
-    }
-
-    const deck = getActiveStudyDeck();
-    if (btnStudyShuffle) {
-      btnStudyShuffle.hidden = deck.length <= 1;
-    }
-
-    studyStage.innerHTML = '';
-
-    if (deck.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'study-empty';
-      const title = document.createElement('p');
-      title.className = 'empty-state-title';
-      title.textContent =
-        studyScope === 'needsReview'
-          ? 'All saved entries are mastered'
-          : 'No cards available in this deck';
-      const desc = document.createElement('p');
-      desc.className = 'empty-state-desc';
-      desc.textContent =
-        studyScope === 'needsReview'
-          ? 'Switch to All Collections above to revise everything again.'
-          : 'Choose another collection or add entries to your library first.';
-      empty.appendChild(title);
-      empty.appendChild(desc);
-      if (studyScope !== 'all' && allEntries.length > 0) {
-        const allBtn = document.createElement('button');
-        allBtn.type = 'button';
-        allBtn.className = 'primary-btn';
-        allBtn.style.marginTop = '12px';
-        allBtn.textContent = `Study All Collections (${allEntries.length})`;
-        allBtn.addEventListener('click', () => {
-          studyScope = 'all';
-          if (studyDeckSelect) studyDeckSelect.value = 'all';
-          startStudySession(CUETShared.buildStudyDeck(allEntries, 'all').map((e) => e.id), false);
-        });
-        empty.appendChild(allBtn);
-      }
-      studyStage.appendChild(empty);
-      return;
-    }
-
-    if (studyComplete) {
-      const summary = document.createElement('div');
-      summary.className = 'study-summary';
-
-      const eyebrow = document.createElement('p');
-      eyebrow.className = 'study-eyebrow';
-      eyebrow.textContent = 'Session Complete';
-
-      const heading = document.createElement('h3');
-      heading.className = 'study-summary-title';
-      heading.textContent = `Reviewed ${deck.length} ${deck.length === 1 ? 'card' : 'cards'}`;
-
-      const note = document.createElement('p');
-      note.className = 'empty-state-desc';
-      note.textContent = 'Your Mastery Levels have been updated automatically.';
-
-      const statsRow = document.createElement('div');
-      statsRow.className = 'study-stats-grid';
-
-      const knownBox = document.createElement('div');
-      knownBox.className = 'study-stat-box is-known';
-      knownBox.innerHTML = `<div class="study-stat-num">${studyKnownIds.length}</div><div class="study-stat-label">Known (Mastered)</div>`;
-
-      const reviewBox = document.createElement('div');
-      reviewBox.className = 'study-stat-box is-review';
-      reviewBox.innerHTML = `<div class="study-stat-num">${studyNeedsReviewIds.length}</div><div class="study-stat-label">Needs Review (Learning)</div>`;
-
-      statsRow.appendChild(knownBox);
-      statsRow.appendChild(reviewBox);
-
-      const actionRow = document.createElement('div');
-      actionRow.className = 'study-summary-actions';
-
-      if (studyNeedsReviewIds.length > 0) {
-        const missedBtn = document.createElement('button');
-        missedBtn.type = 'button';
-        missedBtn.className = 'accent-btn';
-        missedBtn.textContent = `Review Missed Cards (${studyNeedsReviewIds.length})`;
-        missedBtn.addEventListener('click', () => startStudySession([...studyNeedsReviewIds], true));
-        actionRow.appendChild(missedBtn);
-      }
-
-      const againBtn = document.createElement('button');
-      againBtn.type = 'button';
-      againBtn.className = 'secondary-btn';
-      againBtn.textContent = 'Study Again';
-      againBtn.addEventListener('click', () => {
-        startStudySession(CUETShared.buildStudyDeck(allEntries, studyScope).map((e) => e.id), false);
-      });
-
-      const backBtn = document.createElement('button');
-      backBtn.type = 'button';
-      backBtn.className = 'secondary-btn';
-      backBtn.textContent = 'Back to Library';
-      backBtn.addEventListener('click', () => setStudyMode(false));
-
-      actionRow.appendChild(againBtn);
-      actionRow.appendChild(backBtn);
-
-      summary.appendChild(eyebrow);
-      summary.appendChild(heading);
-      summary.appendChild(note);
-      summary.appendChild(statsRow);
-      summary.appendChild(actionRow);
-      studyStage.appendChild(summary);
-      return;
-    }
-
-    const card = deck[studyIndex] || deck[0];
-    const mastery = CUETShared.getMasteryLevel(card);
-    const studied = studyKnownIds.length + studyNeedsReviewIds.length;
-    const pct = Math.round((studied / deck.length) * 100);
-
-    const progressMeta = document.createElement('div');
-    progressMeta.className = 'study-progress-meta';
-    const counterSpan = document.createElement('span');
-    counterSpan.textContent = `Card ${studyIndex + 1} of ${deck.length}`;
-    const talliesSpan = document.createElement('span');
-    talliesSpan.textContent = `${studyKnownIds.length} known · ${studyNeedsReviewIds.length} needs review`;
-    progressMeta.appendChild(counterSpan);
-    progressMeta.appendChild(talliesSpan);
-
-    const progressTrack = document.createElement('div');
-    progressTrack.className = 'study-progress-track';
-    const progressFill = document.createElement('div');
-    progressFill.className = 'study-progress-fill';
-    progressFill.style.width = `${pct}%`;
-    progressTrack.appendChild(progressFill);
-
-    const cardScene = document.createElement('div');
-    cardScene.className = 'flashcard-scene';
-
-    const cardInner = document.createElement('div');
-    cardInner.className = 'flashcard-3d-inner' + (studyFlipped ? ' is-flipped' : '');
-    cardInner.id = 'study-flashcard-inner';
-
-    function makeMetaRow() {
-      const meta = document.createElement('div');
-      meta.className = 'flashcard-meta';
-      const catSpan = document.createElement('span');
-      catSpan.textContent = `${CUETShared.CATEGORY_SINGULAR[card.category]} · ${CUETShared.CATEGORIES[card.category]}`;
-      const levelSpan = document.createElement('span');
-      levelSpan.textContent = CUETShared.MASTERY_LABELS[mastery];
-      meta.appendChild(catSpan);
-      meta.appendChild(levelSpan);
-      return meta;
-    }
-
-    // Front Face
-    const frontCard = document.createElement('div');
-    frontCard.className = 'flashcard flashcard-face flashcard-face-front';
-    frontCard.setAttribute('aria-hidden', studyFlipped ? 'true' : 'false');
-    frontCard.addEventListener('click', (e) => {
-      if (studyFlipped) return;
-      if (e.target && e.target.closest('button')) return;
-      setStudyFlippedState(true);
-    });
-    frontCard.appendChild(makeMetaRow());
-
-    const front = document.createElement('div');
-    front.className = 'flashcard-front';
-    const exprH3 = document.createElement('h3');
-    exprH3.className = 'flashcard-expression';
-    exprH3.textContent = card.expression;
-    const prompt = document.createElement('p');
-    prompt.className = 'flashcard-hint';
-    prompt.textContent = 'Recall the meaning and how to use it in a sentence.';
-    const flipBtn = document.createElement('button');
-    flipBtn.type = 'button';
-    flipBtn.className = 'primary-btn';
-    flipBtn.textContent = 'Flip Card';
-    flipBtn.addEventListener('click', () => setStudyFlippedState(true));
-    front.appendChild(exprH3);
-    front.appendChild(prompt);
-    const frontBtns = document.createElement('div');
-    frontBtns.style.display = 'inline-flex';
-    frontBtns.style.alignItems = 'center';
-    frontBtns.style.gap = '10px';
-    if (canSpeakExpression()) {
-      const listenBtn = document.createElement('button');
-      listenBtn.type = 'button';
-      listenBtn.className = 'secondary-btn';
-      listenBtn.textContent = 'Listen';
-      listenBtn.addEventListener('click', () => speakExpression(card.expression));
-      frontBtns.appendChild(listenBtn);
-    }
-    frontBtns.appendChild(flipBtn);
-    front.appendChild(frontBtns);
-    frontCard.appendChild(front);
-
-    const frontFooter = document.createElement('div');
-    frontFooter.className = 'flashcard-footer';
-    const frontTip = document.createElement('span');
-    frontTip.className = 'flashcard-tip';
-    frontTip.textContent = 'Click card or press Space to flip and check your answer.';
-    frontFooter.appendChild(frontTip);
-    frontCard.appendChild(frontFooter);
-
-    // Back Face
-    const backCard = document.createElement('div');
-    backCard.className = 'flashcard flashcard-face flashcard-face-back';
-    backCard.setAttribute('aria-hidden', studyFlipped ? 'false' : 'true');
-    backCard.appendChild(makeMetaRow());
-
-    const back = document.createElement('div');
-    back.className = 'flashcard-back';
-
-    const backHead = document.createElement('div');
-    backHead.className = 'flashcard-back-head';
-    const backTitleWrap = document.createElement('div');
-    backTitleWrap.style.display = 'flex';
-    backTitleWrap.style.alignItems = 'center';
-    backTitleWrap.style.gap = '10px';
-    const backExprH3 = document.createElement('h3');
-    backExprH3.className = 'flashcard-back-title';
-    backExprH3.textContent = card.expression;
-    backTitleWrap.appendChild(backExprH3);
-    if (canSpeakExpression()) {
-      const backListenBtn = document.createElement('button');
-      backListenBtn.type = 'button';
-      backListenBtn.className = 'row-action-chip';
-      backListenBtn.textContent = 'Listen';
-      backListenBtn.addEventListener('click', () => speakExpression(card.expression));
-      backTitleWrap.appendChild(backListenBtn);
-    }
-    const hideBtn = document.createElement('button');
-    hideBtn.type = 'button';
-    hideBtn.className = 'text-btn';
-    hideBtn.textContent = 'Hide Meaning';
-    hideBtn.addEventListener('click', () => setStudyFlippedState(false));
-    backHead.appendChild(backTitleWrap);
-    backHead.appendChild(hideBtn);
-
-    const meaningP = document.createElement('p');
-    meaningP.className = 'entry-line';
-    const mStrong = document.createElement('strong');
-    mStrong.textContent = 'Meaning: ';
-    meaningP.appendChild(mStrong);
-    meaningP.appendChild(document.createTextNode(card.meaning));
-
-    const exampleP = document.createElement('p');
-    exampleP.className = 'entry-line';
-    const eStrong = document.createElement('strong');
-    eStrong.textContent = 'Example: ';
-    exampleP.appendChild(eStrong);
-    exampleP.appendChild(document.createTextNode(card.example));
-
-    back.appendChild(backHead);
-    back.appendChild(meaningP);
-    back.appendChild(exampleP);
-    backCard.appendChild(back);
-
-    const backFooter = document.createElement('div');
-    backFooter.className = 'flashcard-footer';
-    const backTip = document.createElement('span');
-    backTip.className = 'flashcard-tip';
-    backTip.textContent = 'How well did you recall this?';
-
-    const rateRow = document.createElement('div');
-    rateRow.className = 'study-rate-actions';
-
-    const reviewBtn = document.createElement('button');
-    reviewBtn.type = 'button';
-    reviewBtn.className = 'review-btn';
-    reviewBtn.textContent = 'Needs Review';
-    reviewBtn.addEventListener('click', () => rateStudyCard('needsReview'));
-
-    const knownBtn = document.createElement('button');
-    knownBtn.type = 'button';
-    knownBtn.className = 'accent-btn';
-    knownBtn.textContent = 'Known';
-    knownBtn.addEventListener('click', () => rateStudyCard('known'));
-
-    rateRow.appendChild(reviewBtn);
-    rateRow.appendChild(knownBtn);
-    backFooter.appendChild(backTip);
-    backFooter.appendChild(rateRow);
-    backCard.appendChild(backFooter);
-
-    cardInner.appendChild(frontCard);
-    cardInner.appendChild(backCard);
-    cardScene.appendChild(cardInner);
-
-    const shortcuts = document.createElement('p');
-    shortcuts.className = 'study-shortcuts';
-    shortcuts.textContent = 'Shortcuts: Space to flip · 1 Needs Review · 2 Known';
-
-    studyStage.appendChild(progressMeta);
-    studyStage.appendChild(progressTrack);
-    studyStage.appendChild(cardScene);
-    studyStage.appendChild(shortcuts);
-  }
-
-  function setStudyFlippedState(nextFlipped) {
-    studyFlipped = Boolean(nextFlipped);
-    const inner = document.getElementById('study-flashcard-inner');
-    if (inner) {
-      inner.classList.toggle('is-flipped', studyFlipped);
-      const frontFace = inner.querySelector('.flashcard-face-front');
-      const backFace = inner.querySelector('.flashcard-face-back');
-      if (frontFace) frontFace.setAttribute('aria-hidden', studyFlipped ? 'true' : 'false');
-      if (backFace) backFace.setAttribute('aria-hidden', studyFlipped ? 'false' : 'true');
-    } else {
-      renderStudyMode();
-    }
-  }
-
-  function setStudyMode(enabled) {
-    isStudyMode = enabled;
-    if (enabled) isQuizMode = false;
-    if (studyPanel) studyPanel.hidden = !enabled;
-    if (quizPanel) quizPanel.hidden = true;
-    if (libraryListView) libraryListView.hidden = enabled;
-    if (btnStudyMode) {
-      btnStudyMode.textContent = enabled ? 'Back to List' : 'Study Mode';
-    }
-    if (btnQuizMode) {
-      btnQuizMode.textContent = 'Quiz Mode';
-    }
-    if (enabled) {
-      addPanel.hidden = true;
-      backupPanel.hidden = true;
-      if (studyDeckSelect) studyDeckSelect.value = studyScope;
-      startStudySession(CUETShared.buildStudyDeck(allEntries, studyScope).map((e) => e.id), false);
-    }
-  }
-
-  function setQuizMode(enabled) {
-    isQuizMode = enabled;
-    if (enabled) isStudyMode = false;
-    if (quizPanel) quizPanel.hidden = !enabled;
-    if (studyPanel) studyPanel.hidden = true;
-    if (libraryListView) libraryListView.hidden = enabled;
-    if (btnQuizMode) {
-      btnQuizMode.textContent = enabled ? 'Exit Quiz' : 'Quiz Mode';
-    }
-    if (btnStudyMode) {
-      btnStudyMode.textContent = 'Study Mode';
-    }
-    if (enabled) {
-      addPanel.hidden = true;
-      backupPanel.hidden = true;
-      quizPhase = 'setup';
-      quizSetupError = '';
-      quizPromoted = false;
-      renderQuizMode();
-    }
-  }
-
-  function renderQuizMode() {
-    if (!quizPanel || !quizStage) return;
-    if (btnQuizSetup) btnQuizSetup.hidden = quizPhase === 'setup';
-    quizStage.innerHTML = '';
-
-    const eligible = CUETShared.getQuizEligibleEntries(allEntries);
-    const maxAllowed = Math.min(CUETShared.QUIZ_MAX_QUESTIONS, eligible.length);
-    const letters = ['A', 'B', 'C', 'D'];
-
-    if (quizPhase === 'setup') {
-      if (eligible.length < CUETShared.QUIZ_MIN_QUESTIONS) {
-        const empty = document.createElement('div');
-        empty.className = 'study-empty';
-        const title = document.createElement('p');
-        title.className = 'empty-state-title';
-        title.textContent = `Add at least ${CUETShared.QUIZ_MIN_QUESTIONS} New or Learning entries to take a quiz`;
-        const desc = document.createElement('p');
-        desc.className = 'empty-state-desc';
-        desc.textContent = `You currently have ${eligible.length} eligible ${eligible.length === 1 ? 'entry' : 'entries'}.`;
-        empty.appendChild(title);
-        empty.appendChild(desc);
-        quizStage.appendChild(empty);
-        return;
-      }
-
-      quizCount = Math.max(CUETShared.QUIZ_MIN_QUESTIONS, Math.min(maxAllowed, quizCount));
-      quizSelectedIds = quizSelectedIds.filter((id) => eligible.some((e) => e.id === id));
-
-      const setupWrap = document.createElement('div');
-      setupWrap.className = 'quiz-setup';
-
-      const modeRow = document.createElement('div');
-      modeRow.className = 'quiz-mode-row';
-      const info = document.createElement('div');
-      info.innerHTML = `<strong style="font-size:14px">Word Selection</strong><div class="study-subtitle">${eligible.length} eligible New &amp; Learning entries</div>`;
-
-      const modeToggle = document.createElement('div');
-      modeToggle.className = 'mastery-toggle';
-      for (const mode of ['random', 'custom']) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'mastery-opt' + (quizSelectionMode === mode ? ' is-active is-new' : '');
-        b.textContent = mode === 'random' ? 'Random Words' : 'Select Words';
-        b.addEventListener('click', () => {
-          quizSelectionMode = mode;
-          quizSetupError = '';
-          renderQuizMode();
-        });
-        modeToggle.appendChild(b);
-      }
-      modeRow.appendChild(info);
-      modeRow.appendChild(modeToggle);
-      setupWrap.appendChild(modeRow);
-
-      if (quizSelectionMode === 'random') {
-        const box = document.createElement('div');
-        box.className = 'quiz-box';
-        const lblRow = document.createElement('div');
-        lblRow.className = 'study-progress-meta';
-        lblRow.innerHTML = `<strong style="color:var(--ink)">Number of Questions</strong><strong style="color:var(--accent)">${quizCount} questions</strong>`;
-        const range = document.createElement('input');
-        range.type = 'range';
-        range.min = String(CUETShared.QUIZ_MIN_QUESTIONS);
-        range.max = String(maxAllowed);
-        range.value = String(quizCount);
-        range.style.width = '100%';
-        range.addEventListener('input', () => {
-          quizCount = Number(range.value);
-          renderQuizMode();
-        });
-        box.appendChild(lblRow);
-        box.appendChild(range);
-        setupWrap.appendChild(box);
-      } else {
-        const box = document.createElement('div');
-        box.className = 'quiz-box';
-        const meta = document.createElement('div');
-        meta.className = 'study-progress-meta';
-        meta.textContent = `Selected: ${quizSelectedIds.length} / ${maxAllowed} (min ${CUETShared.QUIZ_MIN_QUESTIONS})`;
-        box.appendChild(meta);
-
-        const list = document.createElement('div');
-        list.className = 'quiz-picker-list';
-        for (const entry of eligible) {
-          const checked = quizSelectedIds.includes(entry.id);
-          const lbl = document.createElement('label');
-          lbl.className = 'quiz-picker-item';
-          const cb = document.createElement('input');
-          cb.type = 'checkbox';
-          cb.checked = checked;
-          cb.disabled = !checked && quizSelectedIds.length >= CUETShared.QUIZ_MAX_QUESTIONS;
-          cb.addEventListener('change', () => {
-            if (cb.checked) {
-              if (quizSelectedIds.length < CUETShared.QUIZ_MAX_QUESTIONS) {
-                quizSelectedIds.push(entry.id);
-              }
-            } else {
-              quizSelectedIds = quizSelectedIds.filter((id) => id !== entry.id);
-            }
-            quizSetupError = '';
-            renderQuizMode();
-          });
-          const nameSpan = document.createElement('span');
-          nameSpan.style.fontWeight = '600';
-          nameSpan.textContent = entry.expression;
-          const catSpan = document.createElement('span');
-          catSpan.className = 'entry-meta';
-          catSpan.textContent = `${CUETShared.CATEGORIES[entry.category]} · ${CUETShared.MASTERY_LABELS[CUETShared.getMasteryLevel(entry)]}`;
-          const left = document.createElement('span');
-          left.style.display = 'inline-flex';
-          left.style.alignItems = 'center';
-          left.style.gap = '8px';
-          left.appendChild(cb);
-          left.appendChild(nameSpan);
-          lbl.appendChild(left);
-          lbl.appendChild(catSpan);
-          list.appendChild(lbl);
-        }
-        box.appendChild(list);
-        setupWrap.appendChild(box);
-      }
-
-      if (quizSetupError) {
-        const errP = document.createElement('p');
-        errP.className = 'modal-error';
-        errP.textContent = quizSetupError;
-        setupWrap.appendChild(errP);
-      }
-
-      const startRow = document.createElement('div');
-      startRow.style.display = 'flex';
-      startRow.style.justifyContent = 'flex-end';
-      const startBtn = document.createElement('button');
-      startBtn.type = 'button';
-      startBtn.className = 'accent-btn';
-      const shownCount = quizSelectionMode === 'random' ? quizCount : quizSelectedIds.length;
-      startBtn.textContent = `Start Quiz (${shownCount} questions)`;
-      startBtn.addEventListener('click', () => {
-        const res = CUETShared.generateQuizQuestions(allEntries, {
-          mode: quizSelectionMode,
-          count: quizCount,
-          selectedIds: quizSelectedIds,
-        });
-        if (!res.ok) {
-          quizSetupError = res.error;
-          renderQuizMode();
-          return;
-        }
-        quizQuestions = res.questions;
-        quizIndex = 0;
-        quizChosenOption = null;
-        quizAnswers = [];
-        quizPromoted = false;
-        quizPhase = 'active';
-        renderQuizMode();
-      });
-      startRow.appendChild(startBtn);
-      setupWrap.appendChild(startRow);
-      quizStage.appendChild(setupWrap);
-      return;
-    }
-
-    if (quizPhase === 'active' && quizQuestions[quizIndex]) {
-      const q = quizQuestions[quizIndex];
-      const correctCount = quizAnswers.filter((a) => a.isCorrect).length;
-
-      const meta = document.createElement('div');
-      meta.className = 'study-progress-meta';
-      meta.innerHTML = `<span>Question ${quizIndex + 1} of ${quizQuestions.length}</span><span>Score: ${correctCount} / ${quizAnswers.length}</span>`;
-      const track = document.createElement('div');
-      track.className = 'study-progress-track';
-      const fill = document.createElement('div');
-      fill.className = 'study-progress-fill';
-      fill.style.width = `${Math.round((quizAnswers.length / quizQuestions.length) * 100)}%`;
-      track.appendChild(fill);
-
-      const card = document.createElement('div');
-      card.className = 'flashcard';
-
-      const top = document.createElement('div');
-      top.className = 'flashcard-meta';
-      top.innerHTML = `<span>${CUETShared.CATEGORY_SINGULAR[q.category]} · ${CUETShared.CATEGORIES[q.category]}</span><span>${CUETShared.MASTERY_LABELS[q.masteryLevel]}</span>`;
-      card.appendChild(top);
-
-      const heading = document.createElement('h3');
-      heading.className = 'flashcard-back-title';
-      heading.style.fontSize = '26px';
-      heading.textContent = q.expression;
-      card.appendChild(heading);
-
-      const optsWrap = document.createElement('div');
-      optsWrap.className = 'quiz-options';
-      q.options.forEach((optText, idx) => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'quiz-option';
-        btn.disabled = quizChosenOption !== null;
-        if (quizChosenOption !== null) {
-          if (idx === q.correctIndex) btn.classList.add('is-correct');
-          else if (idx === quizChosenOption) btn.classList.add('is-wrong');
-        }
-        btn.textContent = `${letters[idx]}. ${optText}`;
-        btn.addEventListener('click', () => {
-          if (quizChosenOption !== null) return;
-          quizChosenOption = idx;
-          quizAnswers.push({ question: q, selectedIndex: idx, isCorrect: idx === q.correctIndex });
-          renderQuizMode();
-        });
-        optsWrap.appendChild(btn);
-      });
-      card.appendChild(optsWrap);
-
-      if (quizChosenOption !== null) {
-        const footer = document.createElement('div');
-        footer.className = 'flashcard-footer';
-        const fb = document.createElement('div');
-        fb.className = 'flashcard-tip';
-        const fbStatus = document.createElement('strong');
-        fbStatus.style.color = quizChosenOption === q.correctIndex ? 'var(--accent)' : 'var(--danger)';
-        fbStatus.textContent =
-          quizChosenOption === q.correctIndex ? 'Correct!' : 'Not quite — see highlighted answer.';
-        const fbExample = document.createElement('div');
-        fbExample.textContent = `Example: ${q.example}`;
-        fb.appendChild(fbStatus);
-        fb.appendChild(fbExample);
-        const nextBtn = document.createElement('button');
-        nextBtn.type = 'button';
-        nextBtn.className = 'primary-btn';
-        nextBtn.textContent = quizIndex + 1 >= quizQuestions.length ? 'View Results' : 'Next Question';
-        nextBtn.addEventListener('click', () => {
-          if (quizIndex + 1 >= quizQuestions.length) {
-            quizPhase = 'results';
-          } else {
-            quizIndex++;
-            quizChosenOption = null;
-          }
-          renderQuizMode();
-        });
-        footer.appendChild(fb);
-        footer.appendChild(nextBtn);
-        card.appendChild(footer);
-      }
-
-      quizStage.appendChild(meta);
-      quizStage.appendChild(track);
-      quizStage.appendChild(card);
-      return;
-    }
-
-    // Results phase
-    const correct = quizAnswers.filter((a) => a.isCorrect);
-    const pct = quizQuestions.length ? Math.round((correct.length / quizQuestions.length) * 100) : 0;
-    const summary = document.createElement('div');
-    summary.className = 'study-summary';
-    summary.innerHTML = `<p class="study-eyebrow">Quiz Complete</p><h3 class="study-summary-title">${correct.length} / ${quizQuestions.length} (${pct}%)</h3>`;
-
-    const actions = document.createElement('div');
-    actions.className = 'study-summary-actions';
-    actions.style.marginTop = '16px';
-    if (correct.length > 0 && !quizPromoted) {
-      const promoteBtn = document.createElement('button');
-      promoteBtn.type = 'button';
-      promoteBtn.className = 'accent-btn';
-      promoteBtn.textContent = `Mark ${correct.length} Correct as Mastered`;
-      promoteBtn.addEventListener('click', async () => {
-        quizPromoted = true;
-        for (const item of correct) {
-          await toggleField(item.question.entryId, 'masteryLevel', 'mastered');
-        }
-        showToast(`Marked ${correct.length} entries as Mastered.`, 'ok');
-        renderQuizMode();
-      });
-      actions.appendChild(promoteBtn);
-    }
-    const newBtn = document.createElement('button');
-    newBtn.type = 'button';
-    newBtn.className = 'secondary-btn';
-    newBtn.textContent = 'New Quiz';
-    newBtn.addEventListener('click', () => {
-      quizPhase = 'setup';
-      renderQuizMode();
-    });
-    const backBtn = document.createElement('button');
-    backBtn.type = 'button';
-    backBtn.className = 'secondary-btn';
-    backBtn.textContent = 'Back to Library';
-    backBtn.addEventListener('click', () => setQuizMode(false));
-    actions.appendChild(newBtn);
-    actions.appendChild(backBtn);
-    summary.appendChild(actions);
-    quizStage.appendChild(summary);
-  }
-
-  function updateDailyGoalUi() {
-    if (!btnDailyGoal) return;
-    const stats = CUETShared.computeDailyGoalStats(allEntries, dailyGoalTarget);
-    if (dailyStreakText) {
-      dailyStreakText.textContent = `🔥 ${stats.streakDays}d`;
-    }
-    if (dailyPopSub) {
-      dailyPopSub.textContent = `${stats.savedToday} of ${stats.target} words saved today`;
-    }
-    if (dailyPopStreak) {
-      dailyPopStreak.textContent = `🔥 ${stats.streakDays} ${stats.streakDays === 1 ? 'day' : 'days'}`;
-    }
-    if (dailyPopFill) {
-      dailyPopFill.style.width = `${stats.progressPercent}%`;
-    }
-    if (dailyGoalInput) {
-      dailyGoalInput.value = String(stats.target);
-    }
-
-    const justReached = prevDailyGoalReached === false && stats.goalReached;
-    prevDailyGoalReached = stats.goalReached;
-
-    btnDailyGoal.classList.toggle('is-reached', stats.goalReached);
-    if (justReached) {
-      if (dailyCelebrateTimer) clearTimeout(dailyCelebrateTimer);
-      btnDailyGoal.classList.add('is-celebrating');
-      if (dailyProgressText) dailyProgressText.textContent = 'Goal Reached!';
-      dailyCelebrateTimer = setTimeout(() => {
-        btnDailyGoal.classList.remove('is-celebrating');
-        if (dailyProgressText) {
-          dailyProgressText.textContent = stats.goalReached
-            ? `Goal Reached ${stats.savedToday}/${stats.target}`
-            : `${stats.savedToday}/${stats.target} today`;
-        }
-      }, 3600);
-    } else if (!btnDailyGoal.classList.contains('is-celebrating')) {
-      if (dailyProgressText) {
-        dailyProgressText.textContent = stats.goalReached
-          ? `Goal Reached ${stats.savedToday}/${stats.target}`
-          : `${stats.savedToday}/${stats.target} today`;
-      }
-    }
-  }
-
-  if (btnDailyGoal && dailyGoalPopover) {
-    btnDailyGoal.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const willOpen = dailyGoalPopover.hidden;
-      dailyGoalPopover.hidden = !willOpen;
-      btnDailyGoal.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
-    });
-    document.addEventListener('click', (e) => {
-      if (dailyGoalWrap && !dailyGoalWrap.contains(e.target)) {
-        dailyGoalPopover.hidden = true;
-        btnDailyGoal.setAttribute('aria-expanded', 'false');
-      }
-    });
-  }
-
-  if (dailyGoalForm && dailyGoalInput) {
-    dailyGoalForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const nextTarget = CUETShared.clampDailyGoal(dailyGoalInput.value);
-      dailyGoalTarget = nextTarget;
-      dailyGoalPopover.hidden = true;
-      btnDailyGoal.setAttribute('aria-expanded', 'false');
-      updateDailyGoalUi();
-      await sendMessage({ type: 'SAVE_DAILY_GOAL', payload: { target: nextTarget } }).catch(() => null);
-    });
-  }
-
-  if (btnToggleInsights) {
-    btnToggleInsights.addEventListener('click', () => {
-      if (isStudyMode || isQuizMode) {
-        setStudyMode(false);
-        setQuizMode(false);
-        showInsights = true;
-      } else {
-        showInsights = !showInsights;
-      }
-      renderInsights();
-    });
-  }
-  if (btnInsightsMastered && btnInsightsAll) {
-    btnInsightsMastered.addEventListener('click', () => {
-      insightsMetric = 'mastered';
-      btnInsightsMastered.className = 'mastery-opt is-active is-mastered';
-      btnInsightsMastered.setAttribute('aria-pressed', 'true');
-      btnInsightsAll.className = 'mastery-opt';
-      btnInsightsAll.setAttribute('aria-pressed', 'false');
-      renderInsights();
-    });
-    btnInsightsAll.addEventListener('click', () => {
-      insightsMetric = 'all';
-      btnInsightsAll.className = 'mastery-opt is-active is-new';
-      btnInsightsAll.setAttribute('aria-pressed', 'true');
-      btnInsightsMastered.className = 'mastery-opt';
-      btnInsightsMastered.setAttribute('aria-pressed', 'false');
-      renderInsights();
-    });
-  }
-
-  if (btnStudyMode) {
-    btnStudyMode.addEventListener('click', () => setStudyMode(!isStudyMode));
-  }
-  if (btnStudyExit) {
-    btnStudyExit.addEventListener('click', () => setStudyMode(false));
-  }
-  if (btnQuizMode) {
-    btnQuizMode.addEventListener('click', () => setQuizMode(!isQuizMode));
-  }
-  if (btnQuizExit) {
-    btnQuizExit.addEventListener('click', () => setQuizMode(false));
-  }
-  if (btnQuizSetup) {
-    btnQuizSetup.addEventListener('click', () => {
-      quizPhase = 'setup';
-      renderQuizMode();
-    });
-  }
-  if (studyDeckSelect) {
-    studyDeckSelect.addEventListener('change', () => {
-      studyScope = studyDeckSelect.value;
-      startStudySession(CUETShared.buildStudyDeck(allEntries, studyScope).map((e) => e.id), false);
-    });
-  }
-  if (btnStudyShuffle) {
-    btnStudyShuffle.addEventListener('click', () => {
-      const ids = getActiveStudyDeck().map((e) => e.id);
-      for (let i = ids.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [ids[i], ids[j]] = [ids[j], ids[i]];
-      }
-      startStudySession(ids, studyMissedRound);
-    });
-  }
-
-  window.addEventListener('keydown', (e) => {
-    if (!isStudyMode || studyComplete) return;
-    const tag = e.target && e.target.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    if (e.code === 'Space') {
-      e.preventDefault();
-      setStudyFlippedState(!studyFlipped);
-    } else if (studyFlipped && e.key === '1') {
-      e.preventDefault();
-      rateStudyCard('needsReview');
-    } else if (studyFlipped && e.key === '2') {
-      e.preventDefault();
-      rateStudyCard('known');
-    }
-  });
-
-  // Sync automatically if popup or content script saves an entry while dashboard is open
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === 'local' && changes.cuet_entries) {
-      allEntries = Array.isArray(changes.cuet_entries.newValue) ? changes.cuet_entries.newValue : [];
+  // ==================== Filter & Tab Listeners ====================
+  tabBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      activeTab = btn.dataset.tab || 'vocabulary';
+      tabBtns.forEach((b) => b.setAttribute('aria-selected', String(b === btn)));
       renderEntries();
-    }
+    });
   });
+
+  searchInput.addEventListener('input', () => {
+    searchQuery = searchInput.value;
+    updateQuickFilterUI();
+    renderEntries();
+  });
+
+  btnClearSearch.addEventListener('click', () => {
+    searchQuery = '';
+    searchInput.value = '';
+    updateQuickFilterUI();
+    renderEntries();
+    searchInput.focus();
+  });
+
+  filterSelect.addEventListener('change', () => {
+    statusFilter = filterSelect.value;
+    updateQuickFilterUI();
+    renderEntries();
+  });
+
+  sourceSelect.addEventListener('change', () => {
+    sourceFilter = sourceSelect.value;
+    updateQuickFilterUI();
+    renderEntries();
+  });
+
+  sortSelect.addEventListener('change', () => {
+    sortOrder = sortSelect.value;
+    updateQuickFilterUI();
+    renderEntries();
+  });
+
+  btnQuickDue.addEventListener('click', () => {
+    statusFilter = statusFilter === 'dueToday' ? 'all' : 'dueToday';
+    updateQuickFilterUI();
+    renderEntries();
+  });
+
+  btnQuickPractice.addEventListener('click', () => {
+    statusFilter = statusFilter === 'needsPractice' ? 'all' : 'needsPractice';
+    if (statusFilter === 'needsPractice') sortOrder = 'mostMissed';
+    updateQuickFilterUI();
+    renderEntries();
+  });
+
+  btnResetFilters.addEventListener('click', () => {
+    searchQuery = '';
+    searchInput.value = '';
+    statusFilter = 'all';
+    sourceFilter = 'all';
+    sortOrder = 'recent';
+    updateQuickFilterUI();
+    renderEntries();
+  });
+
+  // ==================== State Load & Storage Sync ====================
+  async function loadState() {
+    try {
+      const res = await sendMessage({ type: 'GET_STATE' });
+      if (res && res.ok) {
+        allEntries = Array.isArray(res.entries) ? res.entries : [];
+        apiKeyBanner.hidden = Boolean(res.hasApiKey);
+        hasSheetWebhook = Boolean(res.hasSheetWebhook);
+        sheetWebhookUrl = res.sheetWebhookUrl || '';
+        dailyGoalTarget = CUETShared.clampDailyGoal(res.dailyGoalTarget);
+        examConfig = res.examConfig && res.examConfig.examDate ? res.examConfig : null;
+        applyTheme(res.themeMode === 'dark' ? 'dark' : 'light');
+
+        updateCounts();
+        renderDailyGoal();
+        renderExamCountdown();
+        updateSheetSyncControls();
+        renderMasteryProgress();
+        renderMasteryBadges();
+        renderInsights();
+        renderSourceDropdown();
+        updateQuickFilterUI();
+        renderBulkBar();
+        renderEntries();
+        if (isStudyMode) renderStudyMode();
+        if (isQuizMode && quizPhase === 'setup') renderQuizMode();
+      }
+    } catch (err) {
+      showToast('Could not load Vocab Vault: ' + err.message, 'error');
+    }
+  }
+
+  if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'local' && (changes.cuet_entries || changes.cuet_settings)) {
+        void loadState();
+      }
+    });
+  }
 
   loadState();
 })();

@@ -22,8 +22,8 @@
 }
 
 .cuet-vocab-mark[data-cuet-level="learning"] {
-  border-bottom-color: #0f766e;
-  background: rgba(15, 118, 110, 0.06);
+  border-bottom-color: #002962;
+  background: rgba(0, 41, 98, 0.06);
 }
 
 .cuet-vocab-mark:hover,
@@ -34,6 +34,6 @@
 
 .cuet-vocab-mark[data-cuet-level="learning"]:hover,
 .cuet-vocab-mark[data-cuet-level="learning"]:focus-visible {
-  background: rgba(15, 118, 110, 0.14);
+  background: rgba(0, 41, 98, 0.14);
 }
 

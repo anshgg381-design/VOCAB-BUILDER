@@ -1,4 +1,4 @@
-/* CUET Vocabulary Builder — Popup Logic */
+/* IPMAT/CUET VOCAB BUILDER — Popup Logic */
 (function () {
   'use strict';
 
@@ -15,12 +15,19 @@
   const countIdioms = document.getElementById('count-idioms');
   const countPhrasal = document.getElementById('count-phrasal');
   const recentList = document.getElementById('recent-list');
+  const streakMeta = document.getElementById('popup-streak-meta');
+  const dueBadge = document.getElementById('popup-due-badge');
+  const examStrip = document.getElementById('popup-exam-strip');
+  const examText = document.getElementById('popup-exam-text');
 
+  const btnThemeToggle = document.getElementById('btn-theme-toggle');
+  const themeIcon = document.getElementById('theme-icon');
   const btnSettings = document.getElementById('btn-settings');
   const btnNoticeSettings = document.getElementById('btn-notice-settings');
   const btnOpenLibrary = document.getElementById('btn-open-library');
 
   let isProcessing = false;
+  let currentTheme = 'light';
 
   function sendMessage(message) {
     return new Promise((resolve, reject) => {
@@ -34,7 +41,21 @@
     });
   }
 
+  function applyTheme(mode) {
+    currentTheme = mode === 'dark' ? 'dark' : 'light';
+    document.documentElement.classList.toggle('dark', currentTheme === 'dark');
+    if (themeIcon) {
+      themeIcon.textContent = currentTheme === 'dark' ? '☀' : '☾';
+    }
+    if (btnThemeToggle) {
+      btnThemeToggle.title =
+        currentTheme === 'dark' ? 'Switch to Light Mode' : 'Switch to Night Study Dark Mode';
+    }
+  }
+
   function renderState(state) {
+    applyTheme(state.themeMode);
+
     const counts = state.counts || { vocabulary: 0, idioms: 0, phrasalVerbs: 0 };
     countVocab.textContent = String(counts.vocabulary || 0);
     countIdioms.textContent = String(counts.idioms || 0);
@@ -42,7 +63,38 @@
 
     apiKeyNotice.hidden = Boolean(state.hasApiKey);
 
-    const recent = Array.isArray(state.entries) ? state.entries.slice(0, 5) : [];
+    const entries = Array.isArray(state.entries) ? state.entries : [];
+    const goalTarget = CUETShared.clampDailyGoal(state.dailyGoalTarget);
+    const goalStats = CUETShared.computeDailyGoalStats(entries, goalTarget);
+    if (streakMeta) {
+      const streakPrefix = goalStats.streakDays > 0 ? `${goalStats.streakDays}d streak · ` : '';
+      streakMeta.textContent = `${streakPrefix}${goalStats.savedToday}/${goalStats.target} today`;
+    }
+
+    const dueQueue = CUETShared.getDailyReviewQueue(entries);
+    const dueCount = Array.isArray(dueQueue?.dueEntries)
+      ? dueQueue.dueEntries.length
+      : Number(dueQueue?.totalDue || dueQueue?.dueCount || 0);
+    if (dueBadge) {
+      if (dueCount > 0) {
+        dueBadge.hidden = false;
+        dueBadge.textContent = `${dueCount} due today`;
+      } else {
+        dueBadge.hidden = true;
+      }
+    }
+
+    if (examStrip && examText) {
+      const countdown = CUETShared.computeExamCountdown(state.examConfig, entries);
+      if (countdown) {
+        examStrip.hidden = false;
+        examText.textContent = countdown.summaryText;
+      } else {
+        examStrip.hidden = true;
+      }
+    }
+
+    const recent = entries.slice(0, 5);
     recentList.innerHTML = '';
 
     if (recent.length === 0) {
@@ -112,6 +164,18 @@
     } else {
       statusDetails.hidden = true;
     }
+  }
+
+  if (btnThemeToggle) {
+    btnThemeToggle.addEventListener('click', async () => {
+      const next = currentTheme === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      try {
+        await sendMessage({ type: 'SAVE_THEME_MODE', payload: { themeMode: next } });
+      } catch {
+        // Keep local toggle even if background is busy
+      }
+    });
   }
 
   form.addEventListener('submit', async (e) => {
@@ -209,7 +273,7 @@
 
     isProcessing = false;
     saveBtn.disabled = false;
-    saveBtn.textContent = 'Save and Analyse';
+    saveBtn.textContent = 'Add to Vocab Vault';
     await loadState();
   });
 
@@ -225,6 +289,18 @@
     chrome.runtime.sendMessage({ type: 'OPEN_DASHBOARD' });
     window.close();
   });
+
+  if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local') return;
+      if (changes.cuetVocabSettings && changes.cuetVocabSettings.newValue) {
+        applyTheme(changes.cuetVocabSettings.newValue.themeMode);
+      }
+      if (changes.cuetVocabEntries) {
+        loadState();
+      }
+    });
+  }
 
   loadState();
 })();

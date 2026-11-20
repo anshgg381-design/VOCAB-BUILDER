@@ -45,7 +45,7 @@
       z-index: 2147483647;
       pointer-events: auto;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-      color: #111827;
+      color: #002962;
       line-height: 1.45;
       -webkit-font-smoothing: antialiased;
     }
@@ -53,42 +53,42 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 7px 12px;
-      background: #111827;
+      padding: 7px 14px;
+      background: #002962;
       color: #ffffff;
-      border: 1px solid #1f2937;
+      border: 1px solid #001f4d;
       border-radius: 6px;
       font-size: 12.5px;
       font-weight: 600;
       letter-spacing: -0.01em;
       cursor: pointer;
-      box-shadow: 0 4px 14px rgba(17, 24, 39, 0.18);
+      box-shadow: 0 6px 18px rgba(0, 41, 98, 0.24);
       white-space: nowrap;
       transition: background 0.14s ease, transform 0.12s ease;
     }
     .cuet-trigger:hover {
-      background: #1f2937;
+      background: #001f4d;
     }
     .cuet-trigger--saved {
-      background: #0f766e;
-      border-color: #115e59;
+      background: #ea580c;
+      border-color: #c2410c;
     }
     .cuet-trigger--saved:hover {
-      background: #115e59;
+      background: #c2410c;
     }
     .cuet-trigger:focus-visible {
-      outline: 2px solid #0f766e;
+      outline: 2px solid #ea580c;
       outline-offset: 2px;
     }
     .cuet-panel {
-      width: 312px;
+      width: 318px;
       max-width: calc(100vw - 24px);
       background: #ffffff;
-      border: 1px solid #d1d5db;
-      border-radius: 8px;
-      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
-      padding: 14px 16px;
-      color: #111827;
+      border: 1px solid rgba(0, 41, 98, 0.18);
+      border-radius: 10px;
+      box-shadow: 0 14px 32px rgba(0, 41, 98, 0.18);
+      padding: 15px 16px;
+      color: #002962;
     }
     .cuet-panel-head {
       display: flex;
@@ -98,37 +98,39 @@
       margin-bottom: 10px;
     }
     .cuet-kicker {
-      font-size: 11px;
-      font-weight: 600;
-      color: #6b7280;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #3b5578;
       margin: 0 0 2px 0;
     }
     .cuet-expression {
-      font-size: 16px;
+      font-size: 16.5px;
       font-weight: 700;
-      color: #111827;
+      color: #002962;
       margin: 0;
       word-break: break-word;
     }
     .cuet-close {
       background: transparent;
       border: none;
-      color: #6b7280;
+      color: #3b5578;
       font-size: 18px;
       line-height: 1;
-      padding: 2px 4px;
+      padding: 2px 5px;
       cursor: pointer;
-      border-radius: 4px;
+      border-radius: 5px;
     }
     .cuet-close:hover {
-      color: #111827;
-      background: #f3f4f6;
+      color: #002962;
+      background: #f5f3f0;
     }
     .cuet-label {
       display: block;
       font-size: 12px;
       font-weight: 600;
-      color: #374151;
+      color: #3b5578;
       margin-bottom: 6px;
     }
     .cuet-cat-group {
@@ -140,23 +142,24 @@
     .cuet-cat-btn {
       padding: 6px 6px;
       font-size: 12px;
-      font-weight: 500;
-      border: 1px solid #d1d5db;
-      border-radius: 5px;
+      font-weight: 600;
+      border: 1px solid rgba(0, 41, 98, 0.18);
+      border-radius: 6px;
       background: #ffffff;
-      color: #374151;
+      color: #3b5578;
       cursor: pointer;
       white-space: nowrap;
       text-align: center;
       transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
     }
     .cuet-cat-btn:hover {
-      border-color: #9ca3af;
-      color: #111827;
+      border-color: rgba(0, 41, 98, 0.35);
+      color: #002962;
+      background: #f5f3f0;
     }
     .cuet-cat-btn[aria-pressed="true"] {
-      background: #0f766e;
-      border-color: #0f766e;
+      background: #002962;
+      border-color: #002962;
       color: #ffffff;
       font-weight: 600;
     }
@@ -169,28 +172,28 @@
     .cuet-btn-secondary {
       padding: 7px 12px;
       font-size: 12.5px;
-      font-weight: 500;
-      border: 1px solid #d1d5db;
-      border-radius: 5px;
+      font-weight: 600;
+      border: 1px solid rgba(0, 41, 98, 0.2);
+      border-radius: 6px;
       background: #ffffff;
-      color: #374151;
+      color: #002962;
       cursor: pointer;
     }
     .cuet-btn-secondary:hover {
-      background: #f9fafb;
+      background: #f5f3f0;
     }
     .cuet-btn-primary {
       padding: 7px 14px;
       font-size: 12.5px;
       font-weight: 600;
-      border: 1px solid #111827;
-      border-radius: 5px;
-      background: #111827;
+      border: 1px solid #002962;
+      border-radius: 6px;
+      background: #002962;
       color: #ffffff;
       cursor: pointer;
     }
     .cuet-btn-primary:hover {
-      background: #1f2937;
+      background: #001f4d;
     }
     .cuet-btn-primary:disabled {
       opacity: 0.6;
@@ -198,22 +201,22 @@
     }
     .cuet-status {
       font-size: 12.5px;
-      color: #374151;
+      color: #3b5578;
       margin: 4px 0 0 0;
     }
     .cuet-result-row {
       margin: 8px 0 0 0;
       font-size: 13px;
-      color: #1f2937;
+      color: #1a3459;
     }
     .cuet-result-row strong {
-      color: #111827;
+      color: #002962;
       font-weight: 600;
     }
     .cuet-saved-note {
       font-size: 11.5px;
-      font-weight: 600;
-      color: #0f766e;
+      font-weight: 700;
+      color: #ea580c;
       margin: 0 0 4px 0;
     }
     .cuet-error {
@@ -225,14 +228,14 @@
       padding: 6px 10px;
       font-size: 12px;
       font-weight: 600;
-      border: 1px solid #d1d5db;
-      border-radius: 5px;
-      background: #f9fafb;
-      color: #111827;
+      border: 1px solid rgba(0, 41, 98, 0.2);
+      border-radius: 6px;
+      background: #eef3f9;
+      color: #002962;
       cursor: pointer;
     }
     .cuet-link-btn:hover {
-      background: #f3f4f6;
+      background: #e1eaf5;
     }
     .cuet-peek-root {
       position: fixed;
@@ -245,14 +248,14 @@
       -webkit-font-smoothing: antialiased;
     }
     .cuet-peek-card {
-      width: 292px;
+      width: 296px;
       max-width: calc(100vw - 24px);
       background: #ffffff;
-      border: 1px solid #cbd5e1;
-      border-radius: 8px;
-      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+      border: 1px solid rgba(0, 41, 98, 0.18);
+      border-radius: 10px;
+      box-shadow: 0 14px 30px rgba(0, 41, 98, 0.18);
       padding: 12px 14px;
-      color: #0f172a;
+      color: #002962;
     }
     .cuet-peek-head {
       display: flex;
@@ -269,27 +272,27 @@
     }
     .cuet-peek-badge {
       font-size: 10.5px;
-      font-weight: 600;
-      padding: 2px 6px;
+      font-weight: 700;
+      padding: 2px 7px;
       border-radius: 4px;
-      background: #fff7ed;
+      background: #faf0e4;
       color: #c2410c;
-      border: 1px solid #fed7aa;
+      border: 1px solid rgba(234, 88, 12, 0.28);
       white-space: nowrap;
     }
     .cuet-peek-badge.is-learning {
-      background: #f0fdfa;
-      color: #0f766e;
-      border-color: #99f6e4;
+      background: #eef3f9;
+      color: #002962;
+      border-color: rgba(0, 41, 98, 0.2);
     }
     .cuet-peek-meaning {
       font-size: 12.5px;
-      color: #1e293b;
+      color: #1a3459;
       margin: 0 0 6px 0;
     }
     .cuet-peek-example {
       font-size: 11.5px;
-      color: #475569;
+      color: #3b5578;
       margin: 0;
       font-style: italic;
     }
@@ -446,7 +449,7 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = existingEntry ? 'cuet-trigger cuet-trigger--saved' : 'cuet-trigger';
-      btn.textContent = existingEntry ? 'Saved · View' : 'Save to CUET List';
+      btn.textContent = existingEntry ? 'In Vocab Vault · View' : 'Add to Vocab Vault';
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -454,14 +457,14 @@
         renderUI();
       });
       uiContainer.appendChild(btn);
-      positionContainer(activeCapture.rect, existingEntry ? 120 : 150, 36);
+      positionContainer(activeCapture.rect, existingEntry ? 156 : 162, 36);
       return;
     }
 
     const panel = document.createElement('div');
     panel.className = 'cuet-panel';
     panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Save to IPMAT/CUET VOCAB BUILDER');
+    panel.setAttribute('aria-label', 'Add to Vocab Vault');
 
     const head = document.createElement('div');
     head.className = 'cuet-panel-head';
@@ -520,7 +523,7 @@
       const libBtn = document.createElement('button');
       libBtn.type = 'button';
       libBtn.className = 'cuet-link-btn';
-      libBtn.textContent = 'Open Library';
+      libBtn.textContent = 'Open Vocab Vault';
       libBtn.addEventListener('click', () => {
         chrome.runtime.sendMessage({ type: 'OPEN_DASHBOARD' });
         hideUI();
@@ -637,7 +640,7 @@
       const libBtn = document.createElement('button');
       libBtn.type = 'button';
       libBtn.className = 'cuet-link-btn';
-      libBtn.textContent = 'Open Library';
+      libBtn.textContent = 'Open Vocab Vault';
       libBtn.addEventListener('click', () => {
         chrome.runtime.sendMessage({ type: 'OPEN_DASHBOARD' });
         hideUI();
